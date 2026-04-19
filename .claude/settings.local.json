@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(mkdir:*)",
+      "Bash(node debug-cards.js:*)",
+      "Bash(node debug-arrows.js:*)",
+      "Bash(node fetch-transactions.js:*)",
+      "Bash(node debug-pagination.js:*)",
+      "Bash(node debug-by-date.js:*)",
+      "Bash(node debug-divs.js:*)",
+      "Bash(node debug-structure.js:*)",
+      "Bash(node debug-filter.js:*)",
+      "Bash(dir:*)",
+      "Bash(node debug-transaction-detail.js:*)",
+      "Bash(cat:*)",
+      "Bash(tree:*)",
+      "Bash(node --input-type=module --eval \"import './src/config.js'; console.log\\('config ok'\\)\")",
+      "Bash(node --input-type=module --eval ' *)",
+      "Bash(rm -rf \"D:/code/financial-data-bridge/.sessions-test\")",
+      "Bash(npm run *)",
+      "Bash(npm test *)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

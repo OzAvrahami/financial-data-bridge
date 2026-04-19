@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Exports and outputs
+exports/*.json
+*.png
+
+# Session state files (contain auth cookies — never commit these)
+.sessions/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

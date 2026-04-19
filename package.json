@@ -1,0 +1,30 @@
+{
+  "name": "financial-data-provider",
+  "version": "3.0.0",
+  "description": "Automated financial data provider service — fetches transactions from credit card and bank websites. Supports CAL; designed for multi-provider extension.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "fetch": "node index.js",
+    "api": "node src/api/index.js",
+    "test": "node tests/runner.js tests",
+    "test:unit": "node tests/runner.js tests/unit",
+    "test:integration": "node tests/runner.js tests/integration"
+  },
+  "keywords": [
+    "playwright",
+    "automation",
+    "finance",
+    "credit-card",
+    "transactions",
+    "cal"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@playwright/test": "^1.56.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.22.1"
+  }
+}
