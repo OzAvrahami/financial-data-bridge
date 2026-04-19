@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTransaction } from '../../../../src/providers/cal/normalizer.js';
+import { normalizeTransaction, detectCurrency } from '../../../../src/providers/cal/normalizer.js';
 
 const baseRaw = {
   businessName: 'SuperMarket',
@@ -80,5 +80,50 @@ describe('normalizeTransaction', () => {
     assert.equal(t.category, '');
     assert.equal(t.transactionType, '');
     assert.equal(t.status, 'pending'); // no chargeDate
+  });
+});
+
+describe('detectCurrency', () => {
+  it('detects USD from $ symbol', () => {
+    assert.equal(detectCurrency('$125.60'), 'USD');
+  });
+
+  it('detects EUR from € symbol', () => {
+    assert.equal(detectCurrency('€99.00'), 'EUR');
+  });
+
+  it('detects GBP from £ symbol', () => {
+    assert.equal(detectCurrency('£42.50'), 'GBP');
+  });
+
+  it('detects ILS from ₪ symbol', () => {
+    assert.equal(detectCurrency('387.45 ₪'), 'ILS');
+  });
+
+  it('falls back to ILS when no symbol present', () => {
+    assert.equal(detectCurrency('125.60'), 'ILS');
+  });
+
+  it('falls back to ILS for empty string', () => {
+    assert.equal(detectCurrency(''), 'ILS');
+  });
+
+  it('falls back to ILS for undefined', () => {
+    assert.equal(detectCurrency(), 'ILS');
+  });
+
+  it('normalizes USD+ILS transaction correctly', () => {
+    const raw = {
+      ...{ businessName: 'MyFunded Futures', transactionDate: '2026-04-15', chargeDate: '2026-04-20' },
+      amount: 125.6,
+      amountRaw: '$125.60',
+      chargeAmount: 387.45,
+      chargeAmountRaw: '387.45 ₪',
+    };
+    const t = normalizeTransaction(raw);
+    assert.equal(t.amount, 125.6);
+    assert.equal(t.currency, 'USD');
+    assert.equal(t.chargeAmount, 387.45);
+    assert.equal(t.chargeCurrency, 'ILS');
   });
 });

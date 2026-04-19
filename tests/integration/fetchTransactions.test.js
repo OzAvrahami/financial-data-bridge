@@ -14,6 +14,8 @@ import { fetchTransactions } from '../../src/application/fetchTransactions.js';
 import { createFakeProvider } from '../helpers/fakeProvider.js';
 import { FakeBrowserManager } from '../helpers/fakeBrowserManager.js';
 import { FakeSessionStore } from '../helpers/fakeSessionStore.js';
+import { FakeCheckpointStore } from '../helpers/fakeCheckpointStore.js';
+import { FakeSeenStore } from '../helpers/fakeSeenStore.js';
 import { sampleTransactions } from '../fixtures/transactions.js';
 
 // Explicit credentials passed to every call so tests don't depend on env vars.
@@ -27,10 +29,12 @@ function makeDeps({
   sessionState = null,
 } = {}) {
   return {
-    provider:     createFakeProvider(providerOpts),
-    browser:      new FakeBrowserManager(),
-    sessionStore: new FakeSessionStore(sessionState),
-    retryDelay:   0, // no wait time in tests
+    provider:        createFakeProvider(providerOpts),
+    browser:         new FakeBrowserManager(),
+    sessionStore:    new FakeSessionStore(sessionState),
+    checkpointStore: new FakeCheckpointStore(),
+    seenStore:       new FakeSeenStore(),
+    retryDelay:      0, // no wait time in tests
   };
 }
 

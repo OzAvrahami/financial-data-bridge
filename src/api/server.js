@@ -51,17 +51,21 @@ export function createServer() {
 
   // ── POST /transactions/fetch ──────────────────────────────────────────────
   // Body (all optional):
-  //   provider   string  — defaults to PROVIDER env
-  //   accountId  string  — defaults to {PROVIDER}_ACCOUNT_ID env
-  //   daysBack   number  — defaults to DAYS_BACK env
-  //   skipExport boolean — if true, transactions are returned but not written to disk
+  //   provider          string  — defaults to PROVIDER env
+  //   accountId         string  — defaults to {PROVIDER}_ACCOUNT_ID env
+  //   daysBack          number  — defaults to DAYS_BACK env
+  //   skipExport        boolean — if true, transactions returned but not written to disk
+  //   resume            boolean — resume from checkpoint if one exists
+  //   fullFetch         boolean — ignore seen store; export all transactions
   //
   // Response: { provider, accountId, count, filePath, transactions, report }
   app.post('/transactions/fetch', async (req, res) => {
-    const body = req.body ?? {};
+    const body        = req.body ?? {};
     const providerName = (body.provider ?? config.provider).toLowerCase();
-    const daysBack     = typeof body.daysBack === 'number' ? body.daysBack : undefined;
-    const skipExport   = body.skipExport === true;
+    const daysBack    = typeof body.daysBack === 'number' ? body.daysBack : undefined;
+    const skipExport  = body.skipExport  === true;
+    const resume      = body.resume      === true;
+    const fullFetch   = body.fullFetch   === true;
 
     // Validate provider
     if (!providerRegistry.has(providerName)) {
@@ -85,7 +89,7 @@ export function createServer() {
       ));
     }
 
-    logger.info('API: fetch request received', { provider: providerName, account: accountId, daysBack });
+    logger.info('API: fetch request received', { provider: providerName, account: accountId, daysBack, resume, fullFetch });
 
     try {
       const result = await fetchTransactions({
@@ -94,6 +98,8 @@ export function createServer() {
         credentials,
         fetchConfig: daysBack !== undefined ? { daysBack } : undefined,
         skipExport,
+        resume,
+        fullFetch,
       });
 
       res.json({

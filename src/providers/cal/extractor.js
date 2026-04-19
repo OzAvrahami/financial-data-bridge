@@ -47,14 +47,11 @@ export async function extractModalData(page) {
       businessName: '',
       expenseType: '',
       amount: 0,
+      amountRaw: '',
       transactionType: '',
       chargeDate: '',
       chargeAmount: 0,
-      // DEBUG: preserve raw strings from the DOM before any stripping.
-      // Remove these _debug fields once currency extraction is implemented.
-      _debug_amountRaw: '',
-      _debug_chargeAmountRaw: '',
-      _debug_allTableRows: [],
+      chargeAmountRaw: '',
     };
 
     const parseDate = str => {
@@ -68,23 +65,20 @@ export async function extractModalData(page) {
         const key = row.querySelector('.table-key')?.textContent?.trim();
         const val = row.querySelector('.table-value')?.textContent?.trim();
 
-        // DEBUG: capture every key/value pair from the modal table.
-        if (key) raw._debug_allTableRows.push({ key, val: val ?? '' });
-
         if (!key || !val) return;
 
         switch (key) {
           case 'שם בית עסק':   raw.businessName    = val; break;
           case 'תאריך ושעה':   raw.transactionDate = parseDate(val); break;
           case 'סכום העסקה':
-            raw._debug_amountRaw = val;          // DEBUG: full cell text before strip
-            raw.amount = parseFloat(val.replace(/[₪$,]/g, '')) || 0;
+            raw.amountRaw = val;
+            raw.amount = parseFloat(val.replace(/[₪$,€£]/g, '')) || 0;
             break;
           case 'סוג העסקה':    raw.transactionType = val; break;
           case 'מועד החיוב':   raw.chargeDate      = parseDate(val); break;
           case 'סכום החיוב':
-            raw._debug_chargeAmountRaw = val;    // DEBUG: full cell text before strip
-            raw.chargeAmount = parseFloat(val.replace(/[₪$,]/g, '')) || 0;
+            raw.chargeAmountRaw = val;
+            raw.chargeAmount = parseFloat(val.replace(/[₪$,€£]/g, '')) || 0;
             break;
           case 'ענף בית העסק': raw.expenseType     = val; break;
         }

@@ -15,6 +15,13 @@ const state = {
   totalReAuths: 0,
   totalTransactionsFetched: 0,
   totalTransactionsSkipped: 0,
+  // Phase 4
+  resumedRuns: 0,
+  earlyStops: 0,
+  totalDuplicatesSkipped: 0,
+  totalAlreadySeen: 0,
+  checkpointRecoveries: 0,
+  // Last run snapshot
   lastRunAt: null,
   lastRunDurationMs: null,
   lastRunStatus: null,
@@ -37,6 +44,13 @@ export const metrics = {
     if (report.status === 'success') state.successfulRuns++;
     else if (report.status === 'partial') state.partialRuns++;
     else if (report.status === 'failed') state.failedRuns++;
+
+    // Phase 4
+    if (report.resumed)              state.resumedRuns++;
+    if (report.earlyStopTriggered)   state.earlyStops++;
+    if (report.checkpointUsed)       state.checkpointRecoveries++;
+    state.totalDuplicatesSkipped += report.duplicatesSkipped ?? 0;
+    state.totalAlreadySeen       += report.alreadySeenCount ?? 0;
   },
 
   /** Returns a shallow copy of current stats. */
@@ -55,6 +69,11 @@ export const metrics = {
       totalReAuths: 0,
       totalTransactionsFetched: 0,
       totalTransactionsSkipped: 0,
+      resumedRuns: 0,
+      earlyStops: 0,
+      totalDuplicatesSkipped: 0,
+      totalAlreadySeen: 0,
+      checkpointRecoveries: 0,
       lastRunAt: null,
       lastRunDurationMs: null,
       lastRunStatus: null,

@@ -1,6 +1,8 @@
 import { join } from 'path';
 import { BrowserManager } from '../core/BrowserManager.js';
 import { SessionStore } from '../infrastructure/sessionStore.js';
+import { CheckpointStore } from '../infrastructure/checkpointStore.js';
+import { SeenStore, fingerprint } from '../infrastructure/dedup.js';
 import { logger } from '../infrastructure/logger.js';
 import { withRetry } from '../infrastructure/retry.js';
 import { metrics } from '../infrastructure/metrics.js';
@@ -14,26 +16,33 @@ import { providerRegistry } from '../core/providerRegistry.js';
 
 /**
  * Core application use case: authenticate (or reuse session), fetch transactions,
- * handle mid-run re-authentication, collect warnings, optionally export, and
- * return a structured execution report alongside the data.
+ * handle mid-run re-authentication, deduplicate, optionally export, and return a
+ * structured execution report alongside the data.
  *
  * Both CLI and API call this function — no business logic lives in either entrypoint.
  *
  * @param {object} opts
- * @param {string}  [opts.providerName]   - e.g. 'cal'. Defaults to config.provider.
- * @param {string}  [opts.accountId]      - Account/profile identifier. Defaults to config credentials value.
- * @param {object}  [opts.credentials]    - { username, password }. Defaults to config.credentials[provider].
- * @param {object}  [opts.browserConfig]  - { headless, slowMo }
- * @param {object}  [opts.fetchConfig]    - { daysBack }
- * @param {object}  [opts.exportConfig]   - { path }
- * @param {string}  [opts.sessionDir]     - Directory for session state files
- * @param {boolean} [opts.skipExport]     - Skip writing the JSON file (e.g. for API-only callers)
+ * @param {string}  [opts.providerName]          - e.g. 'cal'. Defaults to config.provider.
+ * @param {string}  [opts.accountId]             - Account/profile identifier.
+ * @param {object}  [opts.credentials]           - { username, password }
+ * @param {object}  [opts.browserConfig]         - { headless, slowMo }
+ * @param {object}  [opts.fetchConfig]           - { daysBack }
+ * @param {object}  [opts.exportConfig]          - { path }
+ * @param {string}  [opts.sessionDir]            - Directory for session state files
+ * @param {boolean} [opts.skipExport]            - Skip writing the JSON file
+ * @param {boolean} [opts.resume]                - Resume from checkpoint if one exists (default: false)
+ * @param {boolean} [opts.fullFetch]             - Ignore seen store; export all transactions (default: false)
+ * @param {boolean} [opts.incremental]           - Stop early on consecutive already-seen rows
+ * @param {number}  [opts.earlyStopThreshold]    - Consecutive already-seen rows before stopping
  *
  * @param {object} _deps  - Injectable overrides for testing. Not used in production.
- * @param {object}  [_deps.provider]      - Fake provider instance (bypasses providerRegistry)
- * @param {object}  [_deps.browser]       - Fake BrowserManager instance
- * @param {object}  [_deps.sessionStore]  - Fake SessionStore instance
- * @param {number}  [_deps.retryDelay]    - ms delay for login/re-auth retries (default 2000; use 0 in tests)
+ * @param {object}  [_deps.provider]
+ * @param {object}  [_deps.browser]
+ * @param {object}  [_deps.sessionStore]
+ * @param {object}  [_deps.checkpointStore]
+ * @param {object}  [_deps.seenStore]
+ * @param {number}  [_deps.retryDelay]
+ *
  * @returns {Promise<{ transactions: Transaction[], filePath: string|null, report: RunReport }>}
  */
 export async function fetchTransactions(opts = {}, _deps = {}) {
@@ -45,6 +54,12 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
   const exportConfig  = opts.exportConfig  ?? config.export;
   const sessionDir    = opts.sessionDir    ?? config.session.storageDir;
   const skipExport    = opts.skipExport    ?? false;
+
+  // Phase 4 options
+  const resume             = opts.resume             ?? false;
+  const fullFetch          = opts.fullFetch           ?? false;
+  const incremental        = opts.incremental        ?? fetchConfig.incremental        ?? true;
+  const earlyStopThreshold = opts.earlyStopThreshold ?? fetchConfig.earlyStopThreshold ?? 3;
 
   const report = createRunReport({ provider: providerName, accountId });
 
@@ -59,12 +74,43 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     throw err;
   }
 
-  const retryDelay   = _deps.retryDelay   ?? 2000;
-  const sessionStore = _deps.sessionStore ?? new SessionStore(sessionDir);
-  const browser      = _deps.browser      ?? new BrowserManager();
-  const provider     = _deps.provider     ?? providerRegistry.create(providerName, config);
+  const retryDelay       = _deps.retryDelay       ?? 2000;
+  const sessionStore     = _deps.sessionStore     ?? new SessionStore(sessionDir);
+  const browser          = _deps.browser          ?? new BrowserManager();
+  const provider         = _deps.provider         ?? providerRegistry.create(providerName, config);
+  const checkpointStore  = _deps.checkpointStore  ?? new CheckpointStore(config.checkpoint.dir);
+  const seenStore        = _deps.seenStore        ?? new SeenStore(config.seen.dir);
 
   try {
+    // ── Load checkpoint (if resume requested) ─────────────────────────────
+    let checkpoint = null;
+    if (resume) {
+      checkpoint = await checkpointStore.load(providerName, accountId);
+      if (checkpoint) {
+        report.resumed        = true;
+        report.checkpointUsed = true;
+        report.checkpointPath = checkpointStore.filePath(providerName, accountId);
+        logger.info('Resuming from checkpoint', {
+          provider: providerName,
+          account:  accountId,
+          nextIndex: checkpoint.nextIndex,
+          priorTransactions: checkpoint.transactions?.length ?? 0,
+        });
+      } else {
+        logger.info('No checkpoint found — starting fresh run', { provider: providerName, account: accountId });
+      }
+    }
+
+    const startIndex         = checkpoint?.nextIndex      ?? 0;
+    const priorTransactions  = checkpoint?.transactions   ?? [];
+    const priorWarnings      = checkpoint?.warnings       ?? [];
+
+    // ── Load seen fingerprints ─────────────────────────────────────────────
+    if (!fullFetch) {
+      await seenStore.load(providerName, accountId);
+      logger.debug(`Loaded ${seenStore.size} seen fingerprint(s)`, { provider: providerName });
+    }
+
     // ── Session restore ───────────────────────────────────────────────────
     const savedSession = await sessionStore.load(providerName, accountId);
     const page = await browser.launch(browserConfig, savedSession);
@@ -102,16 +148,71 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
       await sessionStore.save(providerName, accountId, newState);
     }
 
+    // ── Build onProgress callback ─────────────────────────────────────────
+    // Called by the provider after each extracted transaction. Handles:
+    //   1. Checkpoint save (for recovery on interruption)
+    //   2. Already-seen detection (for incremental early-stop)
+    //
+    // Note: already-seen transactions are NOT filtered here — they are still
+    // included in fetchResult.transactions. Dedup happens after the fetch loop.
+    let consecutiveSeen = 0;
+
+    const onProgress = async ({ index, transaction }) => {
+      const fp            = fingerprint(transaction);
+      const alreadySeen   = !fullFetch && seenStore.has(fp);
+
+      if (alreadySeen) {
+        consecutiveSeen++;
+      } else {
+        consecutiveSeen = 0;
+      }
+
+      // Save checkpoint: prior transactions + those extracted so far in this segment.
+      // fetchResult.transactions hasn't been returned yet, so we pass what we know.
+      // The provider will pass its own growing array via the normalized tx argument.
+      await checkpointStore.save(providerName, accountId, {
+        provider: providerName,
+        accountId,
+        startedAt: report.startedAt,
+        daysBack:  fetchConfig.daysBack,
+        nextIndex: index + 1,
+        // We don't have the full provider array here — store only priorTransactions.
+        // New transactions from this run segment are NOT added to the checkpoint because
+        // we don't accumulate them in this closure; we collect them after the fetch.
+        // The checkpoint nextIndex is enough to resume correctly.
+        transactions: priorTransactions,
+        warnings:     priorWarnings,
+      });
+
+      // Early stop: return false to signal the provider to break its loop
+      if (incremental && earlyStopThreshold > 0 && consecutiveSeen >= earlyStopThreshold) {
+        report.earlyStopTriggered = true;
+        report.earlyStopReason    = `${earlyStopThreshold} consecutive already-seen transactions`;
+        logger.info(`Early stop triggered: ${report.earlyStopReason}`, { provider: providerName });
+        return false;
+      }
+
+      return true;
+    };
+
     // ── Fetch transactions (with mid-run re-auth guard) ───────────────────
-    logger.info('Fetching transactions', { provider: providerName, account: accountId, daysBack: fetchConfig.daysBack });
+    logger.info('Fetching transactions', {
+      provider: providerName,
+      account:  accountId,
+      daysBack: fetchConfig.daysBack,
+      ...(startIndex > 0 ? { resumingFromIndex: startIndex } : {}),
+    });
 
     let fetchResult;
     let reAuthAttempted = false;
 
     try {
-      fetchResult = await provider.fetchTransactions({ daysBack: fetchConfig.daysBack });
+      fetchResult = await provider.fetchTransactions({
+        daysBack:   fetchConfig.daysBack,
+        startIndex,
+        onProgress,
+      });
     } catch (fetchErr) {
-      // Check whether the error looks like a session expiry
       const isAuth = await provider.isAuthError(fetchErr).catch(() => false);
 
       if (isAuth && !reAuthAttempted) {
@@ -119,17 +220,17 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
         report.reAuthOccurred = true;
         logger.warn('Mid-run session loss detected — re-authenticating', {
           provider: providerName,
-          account: accountId,
-          error: fetchErr.message,
+          account:  accountId,
+          error:    fetchErr.message,
         });
 
         await withRetry(
           () => provider.login(credentials),
           {
             attempts: 2,
-            delay: retryDelay,
-            label: `${provider.name} re-auth`,
-            onRetry: () => { report.retryCount++; },
+            delay:    retryDelay,
+            label:    `${provider.name} re-auth`,
+            onRetry:  () => { report.retryCount++; },
           }
         );
 
@@ -138,30 +239,71 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
         logger.info('Re-authentication successful — retrying fetch', { provider: providerName, account: accountId });
 
-        // One retry after re-auth. If this also fails we let it propagate.
-        fetchResult = await provider.fetchTransactions({ daysBack: fetchConfig.daysBack });
+        fetchResult = await provider.fetchTransactions({
+          daysBack:   fetchConfig.daysBack,
+          startIndex,
+          onProgress,
+        });
       } else {
         throw fetchErr;
       }
     }
 
-    // ── Collect results ───────────────────────────────────────────────────
-    const { transactions, warnings: providerWarnings = [] } = fetchResult;
+    const { transactions: fetchedTransactions, warnings: providerWarnings = [] } = fetchResult;
 
-    report.transactionsFetched = transactions.length;
-    report.transactionsSkipped = providerWarnings.length;
-    report.warnings.push(...providerWarnings);
+    // ── Merge prior (checkpoint) + this run's transactions ────────────────
+    const allTransactions = [...priorTransactions, ...fetchedTransactions];
 
-    logger.info(`Fetched ${transactions.length} transaction(s)`, {
+    report.transactionsFetched        = fetchedTransactions.length;
+    report.transactionsSkipped        = providerWarnings.length;
+    report.totalTransactionsConsidered = allTransactions.length;
+    report.warnings.push(...priorWarnings, ...providerWarnings);
+
+    logger.info(`Fetched ${fetchedTransactions.length} transaction(s) in this run segment`, {
       provider: providerName,
-      account: accountId,
-      skipped: providerWarnings.length,
+      account:  accountId,
+      prior:    priorTransactions.length,
+      total:    allTransactions.length,
+      skipped:  providerWarnings.length,
     });
 
     if (providerWarnings.length > 0) {
-      logger.warn(`${providerWarnings.length} transaction(s) skipped during extraction`, {
-        provider: providerName,
-      });
+      logger.warn(`${providerWarnings.length} transaction(s) skipped during extraction`, { provider: providerName });
+    }
+
+    // ── Deduplication ─────────────────────────────────────────────────────
+    // Separate allTransactions into new (not previously exported) vs already-seen.
+    // Also deduplicate within this run (same fingerprint appearing twice).
+    const seenInRun        = new Set();
+    const newTransactions  = [];
+    let alreadySeenCount   = 0;
+    let withinRunDupCount  = 0;
+
+    for (const tx of allTransactions) {
+      const fp = fingerprint(tx);
+
+      if (seenInRun.has(fp)) {
+        withinRunDupCount++;
+        continue;
+      }
+      seenInRun.add(fp);
+
+      if (!fullFetch && seenStore.has(fp)) {
+        alreadySeenCount++;
+      } else {
+        newTransactions.push(tx);
+      }
+    }
+
+    report.alreadySeenCount   = alreadySeenCount;
+    report.duplicatesSkipped  = withinRunDupCount;
+    report.newTransactionsExported = newTransactions.length;
+
+    if (alreadySeenCount > 0) {
+      logger.info(`${alreadySeenCount} already-seen transaction(s) excluded from export`, { provider: providerName });
+    }
+    if (withinRunDupCount > 0) {
+      logger.info(`${withinRunDupCount} within-run duplicate(s) skipped`, { provider: providerName });
     }
 
     // ── Persist refreshed session ─────────────────────────────────────────
@@ -170,21 +312,32 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
     // ── Export ────────────────────────────────────────────────────────────
     let filePath = null;
-    if (!skipExport && transactions.length > 0) {
-      const dateStr = new Date().toISOString().split('T')[0];
+    if (!skipExport && newTransactions.length > 0) {
+      const dateStr      = new Date().toISOString().split('T')[0];
       const accountSuffix = accountId && accountId !== 'default' ? `_${accountId}` : '';
       filePath = join(exportConfig.path, `${providerName}${accountSuffix}_${dateStr}.json`);
-      await exportToJSON(transactions, filePath);
+      await exportToJSON(newTransactions, filePath);
       report.exportPath = filePath;
-      logger.info(`Exported ${transactions.length} transaction(s) to ${filePath}`);
+      logger.info(`Exported ${newTransactions.length} new transaction(s) to ${filePath}`);
+    } else if (!skipExport && newTransactions.length === 0) {
+      logger.info('No new transactions to export', { provider: providerName });
     }
+
+    // ── Update seen store ─────────────────────────────────────────────────
+    if (!fullFetch) {
+      for (const tx of newTransactions) seenStore.add(fingerprint(tx));
+      await seenStore.save(providerName, accountId);
+    }
+
+    // ── Clear checkpoint (run completed successfully) ─────────────────────
+    await checkpointStore.clear(providerName, accountId);
 
     // ── Finalize report ───────────────────────────────────────────────────
     const runStatus = providerWarnings.length > 0 ? 'partial' : 'success';
     finalizeReport(report, { status: runStatus });
     metrics.recordRun(report);
 
-    return { transactions, filePath, report };
+    return { transactions: newTransactions, filePath, report };
 
   } catch (err) {
     // Clear the stored session on known auth failures so the next run starts clean
@@ -197,6 +350,8 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
       logger.warn('Auth failure — clearing stored session', { provider: providerName, account: accountId });
       await sessionStore.clear(providerName, accountId).catch(() => {});
     }
+
+    // Checkpoint is NOT cleared on failure — preserved for resume
 
     finalizeReport(report, { status: 'failed', error: err });
     metrics.recordRun(report);

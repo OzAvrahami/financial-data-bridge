@@ -14,11 +14,15 @@
  *       return { transactions: [], warnings: [] };
  *     },
  *   });
+ *
+ * Phase 4: fetchTransactions now accepts { daysBack, startIndex, onProgress }.
+ * The fake calls onProgress for each transaction (mirroring CalProvider) so that
+ * checkpoint and early-stop integration tests work correctly.
  */
 export function createFakeProvider(opts = {}) {
   let _loginCallCount = 0;
   let _fetchCallCount = 0;
-  let _cleanupCalled = false;
+  let _cleanupCalled  = false;
 
   return {
     name: opts.name ?? 'FAKE',
@@ -39,13 +43,38 @@ export function createFakeProvider(opts = {}) {
       if (opts.loginError) throw opts.loginError;
     },
 
-    async fetchTransactions(fetchOpts) {
+    async fetchTransactions({ daysBack, startIndex = 0, onProgress } = {}) {
       _fetchCallCount++;
+
+      let result;
       if (typeof opts.fetch === 'function') {
-        return opts.fetch(_fetchCallCount, _loginCallCount);
+        result = opts.fetch(_fetchCallCount, _loginCallCount);
+      } else if (opts.fetchError) {
+        throw opts.fetchError;
+      } else {
+        result = opts.fetchResult ?? { transactions: [], warnings: [] };
       }
-      if (opts.fetchError) throw opts.fetchError;
-      return opts.fetchResult ?? { transactions: [], warnings: [] };
+
+      const allTransactions = result?.transactions ?? [];
+      const warnings        = result?.warnings     ?? [];
+      const toProcess       = allTransactions.slice(startIndex);
+      const outputTransactions = [];
+
+      for (let i = 0; i < toProcess.length; i++) {
+        const tx = toProcess[i];
+        outputTransactions.push(tx);
+
+        if (onProgress) {
+          const shouldContinue = await onProgress({
+            index:       startIndex + i,
+            total:       allTransactions.length,
+            transaction: tx,
+          });
+          if (shouldContinue === false) break;
+        }
+      }
+
+      return { transactions: outputTransactions, warnings };
     },
 
     async cleanup() {
@@ -53,7 +82,7 @@ export function createFakeProvider(opts = {}) {
     },
 
     // Call-count accessors for assertions
-    get loginCallCount()  { return _loginCallCount; },
+    get loginCallCount() { return _loginCallCount; },
     get fetchCallCount()  { return _fetchCallCount; },
     get cleanupCalled()   { return _cleanupCalled; },
   };

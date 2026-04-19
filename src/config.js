@@ -25,7 +25,11 @@ export const config = {
   },
 
   fetch: {
-    daysBack: parseInt(env('DAYS_BACK', '4'), 10),
+    daysBack:           parseInt(env('DAYS_BACK', '4'), 10),
+    // When true, stop early once earlyStopThreshold consecutive already-seen
+    // transactions are encountered (incremental mode).
+    incremental:        env('INCREMENTAL', 'true') === 'true',
+    earlyStopThreshold: parseInt(env('EARLY_STOP_THRESHOLD', '3'), 10),
   },
 
   export: {
@@ -34,6 +38,14 @@ export const config = {
 
   session: {
     storageDir: env('SESSION_DIR', '.sessions'),
+  },
+
+  checkpoint: {
+    dir: env('CHECKPOINT_DIR', '.checkpoints'),
+  },
+
+  seen: {
+    dir: env('SEEN_DIR', '.seen'),
   },
 
   api: {
