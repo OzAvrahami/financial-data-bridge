@@ -19,7 +19,8 @@ const state = {
   resumedRuns: 0,
   earlyStops: 0,
   totalDuplicatesSkipped: 0,
-  totalAlreadySeen: 0,
+  totalUnchanged: 0,
+  totalUpdated: 0,
   checkpointRecoveries: 0,
   // Last run snapshot
   lastRunAt: null,
@@ -50,7 +51,8 @@ export const metrics = {
     if (report.earlyStopTriggered)   state.earlyStops++;
     if (report.checkpointUsed)       state.checkpointRecoveries++;
     state.totalDuplicatesSkipped += report.duplicatesSkipped ?? 0;
-    state.totalAlreadySeen       += report.alreadySeenCount ?? 0;
+    state.totalUnchanged         += report.unchangedCount   ?? 0;
+    state.totalUpdated           += report.updatedCount     ?? 0;
   },
 
   /** Returns a shallow copy of current stats. */
@@ -72,7 +74,8 @@ export const metrics = {
       resumedRuns: 0,
       earlyStops: 0,
       totalDuplicatesSkipped: 0,
-      totalAlreadySeen: 0,
+      totalUnchanged: 0,
+      totalUpdated: 0,
       checkpointRecoveries: 0,
       lastRunAt: null,
       lastRunDurationMs: null,

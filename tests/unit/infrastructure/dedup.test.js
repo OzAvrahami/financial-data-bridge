@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { fingerprint, SeenStore } from '../../../src/infrastructure/dedup.js';
+import { fingerprint, contentHash, classifyTransaction, SeenStore } from '../../../src/infrastructure/dedup.js';
 import { createTransaction } from '../../../src/schema/transaction.js';
 
-// ── fingerprint ───────────────────────────────────────────────────────────────
+// ── Shared fixture ────────────────────────────────────────────────────────────
 
 const baseTx = createTransaction({
   provider: 'CAL',
@@ -16,12 +16,18 @@ const baseTx = createTransaction({
   amount: 50.5,
   currency: 'ILS',
   transactionType: 'רגיל',
+  status: 'pending',
+  chargeDate: '',
+  chargeAmount: 50.5,
+  chargeCurrency: 'ILS',
+  category: 'Food',
 });
+
+// ── fingerprint ───────────────────────────────────────────────────────────────
 
 describe('fingerprint', () => {
   it('returns a 16-char hex string', () => {
-    const fp = fingerprint(baseTx);
-    assert.match(fp, /^[0-9a-f]{16}$/);
+    assert.match(fingerprint(baseTx), /^[0-9a-f]{16}$/);
   });
 
   it('is deterministic — same input produces same output', () => {
@@ -29,42 +35,112 @@ describe('fingerprint', () => {
   });
 
   it('differs when merchantName changes', () => {
-    const other = { ...baseTx, merchantName: 'OtherShop' };
-    assert.notEqual(fingerprint(baseTx), fingerprint(other));
+    assert.notEqual(fingerprint(baseTx), fingerprint({ ...baseTx, merchantName: 'OtherShop' }));
   });
 
   it('differs when amount changes', () => {
-    const other = { ...baseTx, amount: 99.9 };
-    assert.notEqual(fingerprint(baseTx), fingerprint(other));
+    assert.notEqual(fingerprint(baseTx), fingerprint({ ...baseTx, amount: 99.9 }));
   });
 
   it('differs when transactionDate changes', () => {
-    const other = { ...baseTx, transactionDate: '2026-04-16' };
-    assert.notEqual(fingerprint(baseTx), fingerprint(other));
+    assert.notEqual(fingerprint(baseTx), fingerprint({ ...baseTx, transactionDate: '2026-04-16' }));
   });
 
   it('differs when currency changes', () => {
-    const other = { ...baseTx, currency: 'USD' };
-    assert.notEqual(fingerprint(baseTx), fingerprint(other));
+    assert.notEqual(fingerprint(baseTx), fingerprint({ ...baseTx, currency: 'USD' }));
   });
 
   it('differs when provider changes', () => {
-    const other = { ...baseTx, provider: 'MAX' };
-    assert.notEqual(fingerprint(baseTx), fingerprint(other));
+    assert.notEqual(fingerprint(baseTx), fingerprint({ ...baseTx, provider: 'MAX' }));
   });
 
   it('differs when accountId changes', () => {
-    const other = { ...baseTx, accountId: 'Visa 5678' };
-    assert.notEqual(fingerprint(baseTx), fingerprint(other));
+    assert.notEqual(fingerprint(baseTx), fingerprint({ ...baseTx, accountId: 'Visa 5678' }));
   });
 
-  it('is not affected by chargeAmount or chargeDate (not in fingerprint)', () => {
-    const withExtra  = { ...baseTx, chargeAmount: 999, chargeDate: '2026-04-20' };
+  it('is not affected by chargeDate or chargeAmount (content fields, not identity)', () => {
+    const withExtra = { ...baseTx, chargeAmount: 999, chargeDate: '2026-04-20' };
     assert.equal(fingerprint(baseTx), fingerprint(withExtra));
   });
 });
 
-// ── SeenStore (in-memory operations) ─────────────────────────────────────────
+// ── contentHash ───────────────────────────────────────────────────────────────
+
+describe('contentHash', () => {
+  it('returns a 16-char hex string', () => {
+    assert.match(contentHash(baseTx), /^[0-9a-f]{16}$/);
+  });
+
+  it('is deterministic — same input produces same output', () => {
+    assert.equal(contentHash(baseTx), contentHash({ ...baseTx }));
+  });
+
+  it('differs when status changes', () => {
+    assert.notEqual(contentHash(baseTx), contentHash({ ...baseTx, status: 'completed' }));
+  });
+
+  it('differs when chargeDate changes', () => {
+    assert.notEqual(contentHash(baseTx), contentHash({ ...baseTx, chargeDate: '2026-04-20' }));
+  });
+
+  it('differs when chargeAmount changes', () => {
+    assert.notEqual(contentHash(baseTx), contentHash({ ...baseTx, chargeAmount: 51.5 }));
+  });
+
+  it('differs when chargeCurrency changes', () => {
+    assert.notEqual(contentHash(baseTx), contentHash({ ...baseTx, chargeCurrency: 'USD' }));
+  });
+
+  it('differs when category changes', () => {
+    assert.notEqual(contentHash(baseTx), contentHash({ ...baseTx, category: 'Travel' }));
+  });
+
+  it('is not affected by identity fields (provider, merchantName, amount, etc.)', () => {
+    const sameContent = { ...baseTx, merchantName: 'DifferentShop', amount: 999, provider: 'MAX' };
+    assert.equal(contentHash(baseTx), contentHash(sameContent));
+  });
+
+  it('is not affected by the raw field', () => {
+    const withRaw = { ...baseTx, raw: { surprise: 'different data' } };
+    assert.equal(contentHash(baseTx), contentHash(withRaw));
+  });
+});
+
+// ── classifyTransaction ───────────────────────────────────────────────────────
+
+describe('classifyTransaction', () => {
+  it('returns created when entry not in store', () => {
+    const store = new SeenStore('/tmp');
+    assert.equal(classifyTransaction(store, 'fp1', 'hash1'), 'created');
+  });
+
+  it('returns unchanged when contentHash matches', () => {
+    const store = new SeenStore('/tmp');
+    store.upsert('fp1', 'hash1');
+    assert.equal(classifyTransaction(store, 'fp1', 'hash1'), 'unchanged');
+  });
+
+  it('returns updated when contentHash differs', () => {
+    const store = new SeenStore('/tmp');
+    store.upsert('fp1', 'old-hash');
+    assert.equal(classifyTransaction(store, 'fp1', 'new-hash'), 'updated');
+  });
+
+  it('returns unchanged for legacy entry with null contentHash (migration path)', () => {
+    const store = new SeenStore('/tmp');
+    // Simulate a v1-migrated entry
+    store._entries.set('fp1', { contentHash: null, lastSeenAt: null, updatedAt: null });
+    assert.equal(classifyTransaction(store, 'fp1', 'any-hash'), 'unchanged');
+  });
+
+  it('always returns created when fullFetch is true', () => {
+    const store = new SeenStore('/tmp');
+    store.upsert('fp1', 'hash1');
+    assert.equal(classifyTransaction(store, 'fp1', 'hash1', true), 'created');
+  });
+});
+
+// ── SeenStore — in-memory ─────────────────────────────────────────────────────
 
 describe('SeenStore — in-memory', () => {
   it('starts empty', () => {
@@ -74,32 +150,57 @@ describe('SeenStore — in-memory', () => {
 
   it('has() returns false for unknown fingerprint', () => {
     const store = new SeenStore('/tmp');
-    assert.equal(store.has('abc123'), false);
+    assert.equal(store.has('abc'), false);
   });
 
-  it('has() returns true after add()', () => {
+  it('lookup() returns null for unknown fingerprint', () => {
     const store = new SeenStore('/tmp');
-    store.add('abc123');
-    assert.equal(store.has('abc123'), true);
+    assert.equal(store.lookup('abc'), null);
+  });
+
+  it('has() returns true after upsert()', () => {
+    const store = new SeenStore('/tmp');
+    store.upsert('abc', 'hash1');
+    assert.equal(store.has('abc'), true);
+  });
+
+  it('lookup() returns entry with contentHash after upsert()', () => {
+    const store = new SeenStore('/tmp');
+    store.upsert('abc', 'hash1');
+    const entry = store.lookup('abc');
+    assert.ok(entry, 'entry should exist');
+    assert.equal(entry.contentHash, 'hash1');
+    assert.ok(entry.lastSeenAt, 'lastSeenAt should be set');
+    assert.equal(entry.updatedAt, null, 'updatedAt null for new entry');
+  });
+
+  it('upsert() updates contentHash and sets updatedAt on content change', () => {
+    const store = new SeenStore('/tmp');
+    store.upsert('abc', 'hash1');
+    store.upsert('abc', 'hash2');
+    const entry = store.lookup('abc');
+    assert.equal(entry.contentHash, 'hash2');
+    assert.ok(entry.updatedAt, 'updatedAt should be set after content change');
+  });
+
+  it('upsert() does not set updatedAt when contentHash is the same', () => {
+    const store = new SeenStore('/tmp');
+    store.upsert('abc', 'hash1');
+    store.upsert('abc', 'hash1');
+    const entry = store.lookup('abc');
+    assert.equal(entry.updatedAt, null, 'updatedAt should remain null when content unchanged');
   });
 
   it('size reflects number of unique fingerprints', () => {
     const store = new SeenStore('/tmp');
-    store.add('aaa');
-    store.add('bbb');
-    store.add('aaa'); // duplicate
+    store.upsert('aaa', 'h1');
+    store.upsert('bbb', 'h2');
+    store.upsert('aaa', 'h3'); // same key, update
     assert.equal(store.size, 2);
-  });
-
-  it('addMany() adds all fingerprints', () => {
-    const store = new SeenStore('/tmp');
-    store.addMany(['x', 'y', 'z']);
-    assert.equal(store.size, 3);
-    assert.equal(store.has('y'), true);
   });
 });
 
-// ── SeenStore (persistence) ───────────────────────────────────────────────────
+// ── SeenStore — persistence ───────────────────────────────────────────────────
 
 let tmpDir;
 
@@ -112,16 +213,17 @@ after(async () => {
 });
 
 describe('SeenStore — persistence', () => {
-  it('saves and loads fingerprints', async () => {
+  it('saves and loads v2 entries', async () => {
     const store = new SeenStore(tmpDir);
-    store.add('fp1');
-    store.add('fp2');
+    store.upsert('fp1', 'hash1');
+    store.upsert('fp2', 'hash2');
     await store.save('cal', 'default');
 
     const store2 = new SeenStore(tmpDir);
     await store2.load('cal', 'default');
     assert.equal(store2.has('fp1'), true);
     assert.equal(store2.has('fp2'), true);
+    assert.equal(store2.lookup('fp1').contentHash, 'hash1');
     assert.equal(store2.size, 2);
   });
 
@@ -133,11 +235,30 @@ describe('SeenStore — persistence', () => {
 
   it('isolates by accountId', async () => {
     const storeA = new SeenStore(tmpDir);
-    storeA.add('only-in-A');
+    storeA.upsert('only-in-A', 'hashA');
     await storeA.save('cal', 'accountA');
 
     const storeB = new SeenStore(tmpDir);
-    await storeB.load('cal', 'accountB'); // different account
+    await storeB.load('cal', 'accountB');
     assert.equal(storeB.has('only-in-A'), false);
+  });
+
+  it('migrates v1 fingerprints-array format on load', async () => {
+    // Write a v1-format file directly
+    const { writeFile } = await import('fs/promises');
+    const path = join(tmpDir, 'cal_v1test.json');
+    await writeFile(
+      path,
+      JSON.stringify({ fingerprints: ['legacy-fp-1', 'legacy-fp-2'], savedAt: '2025-01-01T00:00:00.000Z' }),
+      'utf-8'
+    );
+
+    const store = new SeenStore(tmpDir);
+    await store.load('cal', 'v1test');
+    assert.equal(store.has('legacy-fp-1'), true);
+    assert.equal(store.has('legacy-fp-2'), true);
+    // contentHash is null — treated as unchanged (no re-export on migration)
+    assert.equal(store.lookup('legacy-fp-1').contentHash, null);
+    assert.equal(store.size, 2);
   });
 });

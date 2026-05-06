@@ -12,7 +12,9 @@ import '../providers/index.js';
 // If API_KEY env is set, every request must include a matching X-API-Key header.
 // If API_KEY is empty (default), the server is open — suitable for localhost use.
 function apiKeyMiddleware(req, res, next) {
-  const requiredKey = config.api.key;
+  // Read from process.env at request time so the value can be changed at runtime
+  // (e.g. tests deleting API_KEY, or hot-credential rotation without restart).
+  const requiredKey = process.env.API_KEY ?? '';
   if (!requiredKey) return next();
 
   const provided = req.headers['x-api-key'];

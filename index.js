@@ -24,9 +24,9 @@ function printSummary(report) {
   logger.info(`  Duration:     ${((report.durationMs ?? 0) / 1000).toFixed(1)}s`);
   logger.info(`  Considered:   ${report.totalTransactionsConsidered} transaction(s)`);
   logger.info(`  Fetched:      ${report.transactionsFetched} (this run), ${report.transactionsSkipped} skipped`);
-  logger.info(`  Exported:     ${report.newTransactionsExported} new transaction(s)`);
-
-  if (report.alreadySeenCount > 0)  logger.info(`  Already seen: ${report.alreadySeenCount} (excluded from export)`);
+  if (report.createdCount > 0)   logger.info(`  Created:      ${report.createdCount} new transaction(s)`);
+  if (report.updatedCount > 0)   logger.info(`  Updated:      ${report.updatedCount} changed transaction(s)`);
+  if (report.unchangedCount > 0) logger.info(`  Unchanged:    ${report.unchangedCount} (excluded from export)`);
   if (report.duplicatesSkipped > 0) logger.info(`  Duplicates:   ${report.duplicatesSkipped} within-run`);
   if (report.earlyStopTriggered)    logger.info(`  Early stop:   ${report.earlyStopReason}`);
   if (report.resumed)               logger.info(`  Resumed:      from checkpoint ${report.checkpointPath}`);

@@ -1,7 +1,15 @@
 {
-  "fingerprints": [
-    "0fc4e5b06842ec62",
-    "fb2a6ebce27be4e8"
-  ],
-  "savedAt": "2026-05-06T13:45:23.287Z"
+  "entries": {
+    "0fc4e5b06842ec62": {
+      "contentHash": null,
+      "lastSeenAt": null,
+      "updatedAt": null
+    },
+    "fb2a6ebce27be4e8": {
+      "contentHash": null,
+      "lastSeenAt": null,
+      "updatedAt": null
+    }
+  },
+  "savedAt": "2026-05-06T17:39:20.472Z"
 }

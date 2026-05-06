@@ -2,7 +2,7 @@ import { join } from 'path';
 import { BrowserManager } from '../core/BrowserManager.js';
 import { SessionStore } from '../infrastructure/sessionStore.js';
 import { CheckpointStore } from '../infrastructure/checkpointStore.js';
-import { SeenStore, fingerprint } from '../infrastructure/dedup.js';
+import { SeenStore, fingerprint, contentHash, classifyTransaction } from '../infrastructure/dedup.js';
 import { logger } from '../infrastructure/logger.js';
 import { withRetry } from '../infrastructure/retry.js';
 import { metrics } from '../infrastructure/metrics.js';
@@ -151,43 +151,37 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     // ── Build onProgress callback ─────────────────────────────────────────
     // Called by the provider after each extracted transaction. Handles:
     //   1. Checkpoint save (for recovery on interruption)
-    //   2. Already-seen detection (for incremental early-stop)
+    //   2. Classification for incremental early-stop (consecutive unchanged)
     //
-    // Note: already-seen transactions are NOT filtered here — they are still
-    // included in fetchResult.transactions. Dedup happens after the fetch loop.
-    let consecutiveSeen = 0;
+    // Note: classification here drives early-stop only. The authoritative
+    // dedup/export classification runs after the full fetch loop below.
+    let consecutiveUnchanged = 0;
 
     const onProgress = async ({ index, transaction }) => {
-      const fp            = fingerprint(transaction);
-      const alreadySeen   = !fullFetch && seenStore.has(fp);
+      const fp   = fingerprint(transaction);
+      const ch   = contentHash(transaction);
+      const kind = classifyTransaction(seenStore, fp, ch, fullFetch);
 
-      if (alreadySeen) {
-        consecutiveSeen++;
+      if (kind === 'unchanged') {
+        consecutiveUnchanged++;
       } else {
-        consecutiveSeen = 0;
+        consecutiveUnchanged = 0; // created or updated resets the counter
       }
 
-      // Save checkpoint: prior transactions + those extracted so far in this segment.
-      // fetchResult.transactions hasn't been returned yet, so we pass what we know.
-      // The provider will pass its own growing array via the normalized tx argument.
       await checkpointStore.save(providerName, accountId, {
         provider: providerName,
         accountId,
         startedAt: report.startedAt,
         daysBack:  fetchConfig.daysBack,
         nextIndex: index + 1,
-        // We don't have the full provider array here — store only priorTransactions.
-        // New transactions from this run segment are NOT added to the checkpoint because
-        // we don't accumulate them in this closure; we collect them after the fetch.
-        // The checkpoint nextIndex is enough to resume correctly.
         transactions: priorTransactions,
         warnings:     priorWarnings,
       });
 
       // Early stop: return false to signal the provider to break its loop
-      if (incremental && earlyStopThreshold > 0 && consecutiveSeen >= earlyStopThreshold) {
+      if (incremental && earlyStopThreshold > 0 && consecutiveUnchanged >= earlyStopThreshold) {
         report.earlyStopTriggered = true;
-        report.earlyStopReason    = `${earlyStopThreshold} consecutive already-seen transactions`;
+        report.earlyStopReason    = `${earlyStopThreshold} consecutive unchanged transactions`;
         logger.info(`Early stop triggered: ${report.earlyStopReason}`, { provider: providerName });
         return false;
       }
@@ -272,12 +266,14 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     }
 
     // ── Deduplication ─────────────────────────────────────────────────────
-    // Separate allTransactions into new (not previously exported) vs already-seen.
-    // Also deduplicate within this run (same fingerprint appearing twice).
-    const seenInRun        = new Set();
-    const newTransactions  = [];
-    let alreadySeenCount   = 0;
-    let withinRunDupCount  = 0;
+    // Classify each transaction as created / updated / unchanged.
+    // Also deduplicate within this run (same dedupKey appearing twice).
+    const seenInRun       = new Set();
+    const exportedTxs     = []; // created + updated — emitted to caller and export file
+    let createdCount      = 0;
+    let updatedCount      = 0;
+    let unchangedCount    = 0;
+    let withinRunDupCount = 0;
 
     for (const tx of allTransactions) {
       const fp = fingerprint(tx);
@@ -288,19 +284,31 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
       }
       seenInRun.add(fp);
 
-      if (!fullFetch && seenStore.has(fp)) {
-        alreadySeenCount++;
+      const ch   = contentHash(tx);
+      const kind = classifyTransaction(seenStore, fp, ch, fullFetch);
+
+      if (kind === 'created') {
+        createdCount++;
+        exportedTxs.push(tx);
+      } else if (kind === 'updated') {
+        updatedCount++;
+        exportedTxs.push(tx);
       } else {
-        newTransactions.push(tx);
+        unchangedCount++;
       }
     }
 
-    report.alreadySeenCount   = alreadySeenCount;
-    report.duplicatesSkipped  = withinRunDupCount;
-    report.newTransactionsExported = newTransactions.length;
+    report.createdCount            = createdCount;
+    report.updatedCount            = updatedCount;
+    report.unchangedCount          = unchangedCount;
+    report.duplicatesSkipped       = withinRunDupCount;
+    report.newTransactionsExported = createdCount + updatedCount;
 
-    if (alreadySeenCount > 0) {
-      logger.info(`${alreadySeenCount} already-seen transaction(s) excluded from export`, { provider: providerName });
+    if (unchangedCount > 0) {
+      logger.info(`${unchangedCount} unchanged transaction(s) excluded from export`, { provider: providerName });
+    }
+    if (updatedCount > 0) {
+      logger.info(`${updatedCount} transaction(s) updated since last run`, { provider: providerName });
     }
     if (withinRunDupCount > 0) {
       logger.info(`${withinRunDupCount} within-run duplicate(s) skipped`, { provider: providerName });
@@ -312,20 +320,20 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
     // ── Export ────────────────────────────────────────────────────────────
     let filePath = null;
-    if (!skipExport && newTransactions.length > 0) {
-      const dateStr      = new Date().toISOString().split('T')[0];
+    if (!skipExport && exportedTxs.length > 0) {
+      const dateStr       = new Date().toISOString().split('T')[0];
       const accountSuffix = accountId && accountId !== 'default' ? `_${accountId}` : '';
       filePath = join(exportConfig.path, `${providerName}${accountSuffix}_${dateStr}.json`);
-      await exportToJSON(newTransactions, filePath);
+      await exportToJSON(exportedTxs, filePath);
       report.exportPath = filePath;
-      logger.info(`Exported ${newTransactions.length} new transaction(s) to ${filePath}`);
-    } else if (!skipExport && newTransactions.length === 0) {
-      logger.info('No new transactions to export', { provider: providerName });
+      logger.info(`Exported ${exportedTxs.length} transaction(s) to ${filePath} (created: ${createdCount}, updated: ${updatedCount})`);
+    } else if (!skipExport && exportedTxs.length === 0) {
+      logger.info('No new or updated transactions to export', { provider: providerName });
     }
 
     // ── Update seen store ─────────────────────────────────────────────────
     if (!fullFetch) {
-      for (const tx of newTransactions) seenStore.add(fingerprint(tx));
+      for (const tx of exportedTxs) seenStore.upsert(fingerprint(tx), contentHash(tx));
       await seenStore.save(providerName, accountId);
     }
 
@@ -337,7 +345,7 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     finalizeReport(report, { status: runStatus });
     metrics.recordRun(report);
 
-    return { transactions: newTransactions, filePath, report };
+    return { transactions: exportedTxs, filePath, report };
 
   } catch (err) {
     // Clear the stored session on known auth failures so the next run starts clean

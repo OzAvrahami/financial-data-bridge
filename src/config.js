@@ -29,7 +29,7 @@ export const config = {
     // When true, stop early once earlyStopThreshold consecutive already-seen
     // transactions are encountered (incremental mode).
     incremental:        env('INCREMENTAL', 'true') === 'true',
-    earlyStopThreshold: parseInt(env('EARLY_STOP_THRESHOLD', '3'), 10),
+    earlyStopThreshold: parseInt(env('EARLY_STOP_THRESHOLD', '10'), 10),
   },
 
   export: {

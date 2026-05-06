@@ -8,7 +8,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchTransactions } from '../../src/application/fetchTransactions.js';
-import { fingerprint } from '../../src/infrastructure/dedup.js';
+import { fingerprint, contentHash } from '../../src/infrastructure/dedup.js';
 import { createFakeProvider } from '../helpers/fakeProvider.js';
 import { FakeBrowserManager } from '../helpers/fakeBrowserManager.js';
 import { FakeSessionStore } from '../helpers/fakeSessionStore.js';
@@ -157,13 +157,14 @@ describe('resume from checkpoint', () => {
 
 // ── Deduplication ─────────────────────────────────────────────────────────────
 
-describe('deduplication — already-seen transactions', () => {
-  it('excludes already-seen transactions from export', async () => {
-    // Mark the first sample transaction as already seen
+describe('deduplication — unchanged transactions', () => {
+  it('excludes unchanged transactions from export', async () => {
+    // Seed the first sample transaction as seen with matching contentHash → unchanged
     const fp = fingerprint(sampleTransactions[0]);
+    const ch = contentHash(sampleTransactions[0]);
     const deps = makeDeps({
       providerOpts: { fetchResult: { transactions: sampleTransactions, warnings: [] } },
-      seenFingerprints: [fp],
+      seenFingerprints: [fp], // legacy null-hash entry → classified as unchanged
     });
 
     const { transactions, report } = await fetchTransactions(
@@ -171,8 +172,9 @@ describe('deduplication — already-seen transactions', () => {
       deps
     );
 
-    assert.equal(report.alreadySeenCount, 1, 'one transaction should be marked already-seen');
-    assert.equal(transactions.length, sampleTransactions.length - 1, 'already-seen excluded from result');
+    assert.equal(report.unchangedCount, 1, 'one transaction should be unchanged');
+    assert.equal(report.createdCount, sampleTransactions.length - 1);
+    assert.equal(transactions.length, sampleTransactions.length - 1, 'unchanged excluded from result');
     assert.equal(report.newTransactionsExported, sampleTransactions.length - 1);
   });
 
@@ -186,11 +188,12 @@ describe('deduplication — already-seen transactions', () => {
       deps
     );
 
-    assert.equal(report.alreadySeenCount, 0);
+    assert.equal(report.unchangedCount, 0);
+    assert.equal(report.createdCount, sampleTransactions.length);
     assert.equal(transactions.length, sampleTransactions.length);
   });
 
-  it('adds new transaction fingerprints to seen store after run', async () => {
+  it('upserts exported transactions into seen store after run', async () => {
     const deps = makeDeps({
       providerOpts: { fetchResult: { transactions: sampleTransactions, warnings: [] } },
     });
@@ -198,9 +201,10 @@ describe('deduplication — already-seen transactions', () => {
     await fetchTransactions({ credentials: TEST_CREDS, skipExport: true }, deps);
 
     assert.equal(deps.seenStore.saved, true, 'seen store should be saved');
-    // All new transactions should now be in the seen store
     for (const tx of sampleTransactions) {
       assert.equal(deps.seenStore.has(fingerprint(tx)), true, `${tx.merchantName} should be in seen store`);
+      const entry = deps.seenStore.lookup(fingerprint(tx));
+      assert.ok(entry?.contentHash, 'entry should have a non-null contentHash after run');
     }
   });
 
@@ -216,12 +220,11 @@ describe('deduplication — already-seen transactions', () => {
       deps
     );
 
-    assert.equal(report.alreadySeenCount, 0, 'fullFetch should ignore seen store');
+    assert.equal(report.unchangedCount, 0, 'fullFetch should ignore seen store');
     assert.equal(transactions.length, sampleTransactions.length, 'all transactions exported');
   });
 
   it('within-run duplicates are counted in duplicatesSkipped', async () => {
-    // Provider returns the same transaction twice (unusual but possible edge case)
     const dupTx = sampleTransactions[0];
     const deps = makeDeps({
       providerOpts: { fetchResult: { transactions: [dupTx, dupTx], warnings: [] } },
@@ -252,8 +255,8 @@ describe('incremental early stop', () => {
 
   const txList = [tx(5), tx(4), tx(3), tx(2), tx(1)]; // newest-first
 
-  it('stops early when earlyStopThreshold consecutive already-seen transactions reached', async () => {
-    // Mark tx(3), tx(2), tx(1) as already seen (the last 3 in the list)
+  it('stops early when earlyStopThreshold consecutive unchanged transactions reached', async () => {
+    // Seed tx(3), tx(2), tx(1) as unchanged (legacy null-hash entries)
     const seenFps = [tx(3), tx(2), tx(1)].map(fingerprint);
     const deps = makeDeps({
       providerOpts: { fetchResult: { transactions: txList, warnings: [] } },
@@ -271,7 +274,7 @@ describe('incremental early stop', () => {
     );
 
     assert.equal(report.earlyStopTriggered, true, 'early stop should be triggered');
-    assert.ok(report.earlyStopReason, 'earlyStopReason should be set');
+    assert.ok(report.earlyStopReason?.includes('unchanged'), 'earlyStopReason should mention unchanged');
   });
 
   it('does not stop early when incremental: false', async () => {
@@ -334,7 +337,9 @@ describe('run report — Phase 4 fields', () => {
 
     assert.equal(typeof report.resumed, 'boolean');
     assert.equal(typeof report.checkpointUsed, 'boolean');
-    assert.equal(typeof report.alreadySeenCount, 'number');
+    assert.equal(typeof report.createdCount, 'number');
+    assert.equal(typeof report.updatedCount, 'number');
+    assert.equal(typeof report.unchangedCount, 'number');
     assert.equal(typeof report.duplicatesSkipped, 'number');
     assert.equal(typeof report.newTransactionsExported, 'number');
     assert.equal(typeof report.totalTransactionsConsidered, 'number');
@@ -345,7 +350,145 @@ describe('run report — Phase 4 fields', () => {
     assert.equal(report.checkpointPath, null);
     assert.equal(report.earlyStopTriggered, false);
     assert.equal(report.earlyStopReason, null);
+    // Fresh run: everything is new
+    assert.equal(report.createdCount, sampleTransactions.length);
+    assert.equal(report.updatedCount, 0);
+    assert.equal(report.unchangedCount, 0);
     assert.equal(report.newTransactionsExported, sampleTransactions.length);
     assert.equal(report.totalTransactionsConsidered, sampleTransactions.length);
+  });
+});
+
+// ── Update-aware deduplication ────────────────────────────────────────────────
+
+describe('update-aware deduplication', () => {
+  // A transaction that starts as pending and later settles (content changes)
+  const pendingTx = createTransaction({
+    provider: 'CAL', accountId: 'Visa 1234',
+    transactionDate: '2026-05-01', merchantName: 'Café Central',
+    amount: 42, currency: 'ILS', transactionType: 'רגיל',
+    status: 'pending', chargeDate: '', chargeAmount: 42, chargeCurrency: 'ILS', category: '',
+  });
+
+  const settledTx = {
+    ...pendingTx,
+    status: 'completed',
+    chargeDate: '2026-05-05',
+    chargeAmount: 42,
+  };
+
+  it('new transaction is exported and classified as created', async () => {
+    const deps = makeDeps({
+      providerOpts: { fetchResult: { transactions: [pendingTx], warnings: [] } },
+    });
+
+    const { transactions, report } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true },
+      deps
+    );
+
+    assert.equal(report.createdCount, 1);
+    assert.equal(report.updatedCount, 0);
+    assert.equal(report.unchangedCount, 0);
+    assert.equal(transactions.length, 1);
+  });
+
+  it('transaction with identical content is classified as unchanged and excluded', async () => {
+    const fp = fingerprint(pendingTx);
+    const ch = contentHash(pendingTx);
+    const deps = makeDeps({
+      providerOpts: { fetchResult: { transactions: [pendingTx], warnings: [] } },
+    });
+    deps.seenStore.upsert(fp, ch); // same contentHash → unchanged
+
+    const { transactions, report } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true },
+      deps
+    );
+
+    assert.equal(report.createdCount, 0);
+    assert.equal(report.updatedCount, 0);
+    assert.equal(report.unchangedCount, 1);
+    assert.equal(transactions.length, 0, 'unchanged transactions must not be emitted');
+  });
+
+  it('transaction with changed content is classified as updated and included', async () => {
+    const fp = fingerprint(pendingTx); // same identity key
+    const oldHash = contentHash(pendingTx);
+    const newHash = contentHash(settledTx); // different (status + chargeDate changed)
+    assert.notEqual(oldHash, newHash, 'test setup: hashes must differ');
+
+    const deps = makeDeps({
+      providerOpts: { fetchResult: { transactions: [settledTx], warnings: [] } },
+    });
+    deps.seenStore.upsert(fp, oldHash); // stale hash from previous run
+
+    const { transactions, report } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true },
+      deps
+    );
+
+    assert.equal(report.createdCount, 0);
+    assert.equal(report.updatedCount, 1);
+    assert.equal(report.unchangedCount, 0);
+    assert.equal(transactions.length, 1, 'updated transaction must be emitted');
+  });
+
+  it('updated transaction resets the consecutive-unchanged counter (early stop does not fire)', async () => {
+    // 8 unchanged + 1 updated + 1 new = max consecutive unchanged streak is 8, below threshold=10
+    const txs = Array.from({ length: 10 }, (_, i) => createTransaction({
+      provider: 'CAL', accountId: 'Visa 1234',
+      transactionDate: `2026-05-${String(i + 1).padStart(2, '0')}`,
+      merchantName: `Shop ${i}`, amount: i + 1, currency: 'ILS', transactionType: 'רגיל',
+      status: 'completed', chargeDate: '2026-05-31', chargeAmount: i + 1, chargeCurrency: 'ILS', category: '',
+    }));
+
+    const deps = makeDeps({
+      providerOpts: { fetchResult: { transactions: txs, warnings: [] } },
+    });
+
+    // txs[0..7]: seed with matching contentHash → unchanged (8 consecutive)
+    for (const tx of txs.slice(0, 8)) {
+      deps.seenStore.upsert(fingerprint(tx), contentHash(tx));
+    }
+    // txs[8]: seed with stale hash → updated (resets counter)
+    deps.seenStore.upsert(fingerprint(txs[8]), 'stale-hash-00000000');
+    // txs[9]: not seen → created
+
+    const { report } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true, incremental: true, earlyStopThreshold: 10 },
+      deps
+    );
+
+    assert.equal(report.earlyStopTriggered, false, 'updated tx should reset counter and prevent early stop');
+    assert.equal(report.unchangedCount, 8);
+    assert.equal(report.updatedCount, 1);
+    assert.equal(report.createdCount, 1);
+  });
+
+  it('early stop triggers after consecutive unchanged threshold is reached', async () => {
+    const txs = Array.from({ length: 12 }, (_, i) => createTransaction({
+      provider: 'CAL', accountId: 'Visa 1234',
+      transactionDate: `2026-05-${String(i + 1).padStart(2, '0')}`,
+      merchantName: `Shop ${i}`, amount: i + 1, currency: 'ILS', transactionType: 'רגיל',
+      status: 'completed', chargeDate: '2026-05-31', chargeAmount: i + 1, chargeCurrency: 'ILS', category: '',
+    }));
+
+    const deps = makeDeps({
+      providerOpts: { fetchResult: { transactions: txs, warnings: [] } },
+    });
+
+    // All 12 seeded with matching contentHash → all unchanged
+    for (const tx of txs) {
+      deps.seenStore.upsert(fingerprint(tx), contentHash(tx));
+    }
+
+    const { report } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true, incremental: true, earlyStopThreshold: 10 },
+      deps
+    );
+
+    assert.equal(report.earlyStopTriggered, true, 'should stop after 10 consecutive unchanged');
+    assert.ok(report.earlyStopReason?.includes('unchanged'), 'reason should mention unchanged');
   });
 });

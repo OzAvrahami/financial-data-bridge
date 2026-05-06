@@ -20,11 +20,13 @@
  * @property {boolean}  resumed                   - true when a checkpoint was loaded and used
  * @property {boolean}  checkpointUsed
  * @property {string|null} checkpointPath
- * // Phase 4 — dedup + incremental
+ * // Phase 4 — update-aware deduplication
  * @property {number}   totalTransactionsConsidered - prior (checkpoint) + fetched this run
- * @property {number}   alreadySeenCount           - transactions already in SeenStore
- * @property {number}   duplicatesSkipped          - within-run duplicate fingerprints
- * @property {number}   newTransactionsExported    - transactions written to the export file
+ * @property {number}   createdCount              - new transactions exported (not previously seen)
+ * @property {number}   updatedCount              - transactions re-exported due to content change
+ * @property {number}   unchangedCount            - transactions skipped (identical to previous run)
+ * @property {number}   newTransactionsExported   - createdCount + updatedCount (total emitted)
+ * @property {number}   duplicatesSkipped         - within-run duplicate dedupKeys
  * @property {boolean}  earlyStopTriggered
  * @property {string|null} earlyStopReason
  */
@@ -45,14 +47,17 @@ export function createRunReport({ provider, accountId = 'default' } = {}) {
     warnings: [],
     fatalError: null,
     exportPath: null,
-    // Phase 4
+    // Phase 4 — checkpoint
     resumed: false,
     checkpointUsed: false,
     checkpointPath: null,
+    // Phase 4 — update-aware dedup
     totalTransactionsConsidered: 0,
-    alreadySeenCount: 0,
-    duplicatesSkipped: 0,
+    createdCount: 0,
+    updatedCount: 0,
+    unchangedCount: 0,
     newTransactionsExported: 0,
+    duplicatesSkipped: 0,
     earlyStopTriggered: false,
     earlyStopReason: null,
   };
