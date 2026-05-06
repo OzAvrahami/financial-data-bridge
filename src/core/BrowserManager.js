@@ -15,11 +15,13 @@ export class BrowserManager {
     this.browser = await chromium.launch({
       headless: options.headless ?? true,
       slowMo: options.slowMo ?? 0,
+      args: ['--no-sandbox', '--disable-dev-shm-usage'],
     });
 
     const contextOptions = {
       locale: 'he-IL',
       viewport: { width: 1280, height: 720 },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     };
 
     if (storageState) {
@@ -27,6 +29,11 @@ export class BrowserManager {
     }
 
     this.context = await this.browser.newContext(contextOptions);
+
+    await this.context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+
     this.page = await this.context.newPage();
     return this.page;
   }

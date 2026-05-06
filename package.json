@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
+    "start": "node src/api/index.js",
     "fetch": "node index.js",
     "api": "node src/api/index.js",
     "test": "node tests/runner.js tests",

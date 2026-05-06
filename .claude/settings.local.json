@@ -20,7 +20,8 @@
       "Bash(rm -rf \"D:/code/financial-data-bridge/.sessions-test\")",
       "Bash(npm run *)",
       "Bash(npm test *)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\code\\\\financial-data-bridge\" -Recurse -Force | Select-Object FullName | Sort-Object FullName | ForEach-Object { $_.FullName })"
     ],
     "deny": [],
     "ask": []
