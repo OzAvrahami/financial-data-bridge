@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/api/index.js",
     "fetch": "node index.js",
-    "api": "node src/api/index.js",
+    "export:finance": "node scripts/exportToFinance.js",
     "test": "node tests/runner.js tests",
     "test:unit": "node tests/runner.js tests/unit",
     "test:integration": "node tests/runner.js tests/integration"

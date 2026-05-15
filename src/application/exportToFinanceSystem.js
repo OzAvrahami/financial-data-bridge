@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-function shouldSendTransaction(transaction) {
+export function shouldSendTransaction(transaction) {
     if (!transaction) return false;
 
     if (transaction.status !== "completed") {
