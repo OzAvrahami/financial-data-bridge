@@ -21,7 +21,9 @@
       "Bash(npm run *)",
       "Bash(npm test *)",
       "Bash(node *)",
-      "PowerShell(Get-ChildItem -Path \"D:\\\\code\\\\financial-data-bridge\" -Recurse -Force | Select-Object FullName | Sort-Object FullName | ForEach-Object { $_.FullName })"
+      "PowerShell(Get-ChildItem -Path \"D:\\\\code\\\\financial-data-bridge\" -Recurse -Force | Select-Object FullName | Sort-Object FullName | ForEach-Object { $_.FullName })",
+      "Bash(Get-ChildItem \"D:\\\\code\\\\financial-data-bridge\" -Exclude node_modules)",
+      "Bash(Select-Object Name, PSIsContainer)"
     ],
     "deny": [],
     "ask": []

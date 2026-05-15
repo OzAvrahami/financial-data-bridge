@@ -9,9 +9,8 @@ import { join } from 'path';
  * Uses only immutable identity fields: provider, accountId, transactionDate,
  * merchantName, amount, currency, transactionType.
  *
- * Collision risk: two purchases at the same merchant on the same day for the
- * same amount in the same currency will produce the same fingerprint.
- * Accepted limitation for solo-developer use.
+ * Two transactions with identical business fields produce the same base fingerprint.
+ * Use assignOccurrenceKeys() to disambiguate them within a fetch batch.
  */
 export function fingerprint(t) {
   const key = [
@@ -24,6 +23,49 @@ export function fingerprint(t) {
     t.transactionType,
   ].join('|');
   return createHash('sha256').update(key).digest('hex').slice(0, 16);
+}
+
+/**
+ * Assign a stable `dedupKey` to every transaction in the array, in place.
+ *
+ * For transactions whose base fingerprint appears exactly once in the batch,
+ * dedupKey equals fingerprint(tx) — backward-compatible with existing SeenStore
+ * entries (no re-export on upgrade).
+ *
+ * For transactions whose base fingerprint appears more than once (genuine business-
+ * field duplicates such as two recurring charges for the same amount), occurrence
+ * indices are assigned in extraction order:
+ *   occurrenceIndex 1  → dedupKey = fingerprint(tx)          (no suffix — backward compat)
+ *   occurrenceIndex 2  → dedupKey = fingerprint(tx) + "|#2"
+ *   occurrenceIndex N  → dedupKey = fingerprint(tx) + "|#N"
+ *
+ * This ensures:
+ *   - A transaction that was unique in a prior run (stored as baseFp) is still
+ *     matched correctly if it remains the first occurrence in a later run.
+ *   - A genuinely new second occurrence gets a distinct key and is treated as 'created'.
+ *
+ * Risk: occurrence order depends on DOM extraction order. If CAL reorders rows between
+ * runs, the mapping of "first" vs "second" occurrence may shift. There is no server-side
+ * unique identifier available to anchor the assignment.
+ *
+ * @param {Transaction[]} transactions - Mutated in place.
+ */
+export function assignOccurrenceKeys(transactions) {
+  // First pass: count how many times each base fingerprint appears.
+  const totalCount = new Map(); // baseFp → total occurrences in this batch
+  for (const tx of transactions) {
+    const baseFp = fingerprint(tx);
+    totalCount.set(baseFp, (totalCount.get(baseFp) ?? 0) + 1);
+  }
+
+  // Second pass: assign dedupKey in extraction order.
+  const seenCount = new Map(); // baseFp → how many we have assigned so far
+  for (const tx of transactions) {
+    const baseFp = fingerprint(tx);
+    const occ = (seenCount.get(baseFp) ?? 0) + 1;
+    seenCount.set(baseFp, occ);
+    tx.dedupKey = occ === 1 ? baseFp : `${baseFp}|#${occ}`;
+  }
 }
 
 /**

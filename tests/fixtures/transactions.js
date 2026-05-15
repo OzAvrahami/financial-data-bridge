@@ -34,6 +34,44 @@ export const sampleTransactions = [
   }),
 ];
 
+/**
+ * Two real transactions that are indistinguishable by business fields alone.
+ * Mirrors the TOPSTEP recurring-charge scenario: same merchant, date, amount,
+ * currency, chargeDate, chargeAmount, and transactionType.
+ */
+export const duplicateBusinessFieldTransactions = [
+  createTransaction({
+    provider: 'CAL',
+    accountId: 'ויזה5304',
+    transactionDate: '2026-05-10',
+    chargeDate: '2026-06-10',
+    merchantName: 'TOPSTEP',
+    category: '',
+    amount: 85,
+    currency: 'USD',
+    chargeAmount: 254.68,
+    chargeCurrency: 'ILS',
+    transactionType: 'הוראת קבע',
+    status: 'completed',
+    raw: {},
+  }),
+  createTransaction({
+    provider: 'CAL',
+    accountId: 'ויזה5304',
+    transactionDate: '2026-05-10',
+    chargeDate: '2026-06-10',
+    merchantName: 'TOPSTEP',
+    category: '',
+    amount: 85,
+    currency: 'USD',
+    chargeAmount: 254.68,
+    chargeCurrency: 'ILS',
+    transactionType: 'הוראת קבע',
+    status: 'completed',
+    raw: {},
+  }),
+];
+
 /** Sample raw CAL modal data before normalization. */
 export const sampleRawTransaction = {
   businessName: 'SuperMarket',

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { fingerprint, contentHash, classifyTransaction, SeenStore } from '../../../src/infrastructure/dedup.js';
+import { fingerprint, contentHash, classifyTransaction, assignOccurrenceKeys, SeenStore } from '../../../src/infrastructure/dedup.js';
 import { createTransaction } from '../../../src/schema/transaction.js';
 
 // ── Shared fixture ────────────────────────────────────────────────────────────
@@ -61,6 +61,91 @@ describe('fingerprint', () => {
   it('is not affected by chargeDate or chargeAmount (content fields, not identity)', () => {
     const withExtra = { ...baseTx, chargeAmount: 999, chargeDate: '2026-04-20' };
     assert.equal(fingerprint(baseTx), fingerprint(withExtra));
+  });
+});
+
+// ── assignOccurrenceKeys ──────────────────────────────────────────────────────
+
+describe('assignOccurrenceKeys', () => {
+  it('assigns dedupKey equal to fingerprint when transaction is unique in the batch', () => {
+    const tx = { ...baseTx };
+    assignOccurrenceKeys([tx]);
+    assert.equal(tx.dedupKey, fingerprint(baseTx));
+  });
+
+  it('assigns no suffix to occurrenceIndex 1, and "|#2" suffix to occurrenceIndex 2', () => {
+    const tx1 = { ...baseTx };
+    const tx2 = { ...baseTx }; // identical business fields
+    assignOccurrenceKeys([tx1, tx2]);
+
+    const baseFp = fingerprint(baseTx);
+    assert.equal(tx1.dedupKey, baseFp,           'first occurrence: no suffix');
+    assert.equal(tx2.dedupKey, `${baseFp}|#2`,   'second occurrence: |#2 suffix');
+  });
+
+  it('assigns "|#3" to a third identical transaction', () => {
+    const tx1 = { ...baseTx };
+    const tx2 = { ...baseTx };
+    const tx3 = { ...baseTx };
+    assignOccurrenceKeys([tx1, tx2, tx3]);
+
+    const baseFp = fingerprint(baseTx);
+    assert.equal(tx1.dedupKey, baseFp);
+    assert.equal(tx2.dedupKey, `${baseFp}|#2`);
+    assert.equal(tx3.dedupKey, `${baseFp}|#3`);
+  });
+
+  it('gives distinct dedupKeys to two genuinely different transactions', () => {
+    const txA = { ...baseTx };
+    const txB = { ...baseTx, merchantName: 'OtherShop' };
+    assignOccurrenceKeys([txA, txB]);
+
+    assert.notEqual(txA.dedupKey, txB.dedupKey);
+    assert.equal(txA.dedupKey, fingerprint(txA)); // unique → no suffix
+    assert.equal(txB.dedupKey, fingerprint(txB)); // unique → no suffix
+  });
+
+  it('handles a mixed batch: unique + duplicates', () => {
+    const dup1 = { ...baseTx };
+    const dup2 = { ...baseTx };
+    const other = { ...baseTx, merchantName: 'Unique Shop' };
+    assignOccurrenceKeys([dup1, other, dup2]);
+
+    const baseFp = fingerprint(baseTx);
+    assert.equal(dup1.dedupKey,  baseFp,           'first dup: no suffix');
+    assert.equal(other.dedupKey, fingerprint(other), 'unique: no suffix');
+    assert.equal(dup2.dedupKey,  `${baseFp}|#2`,   'second dup: |#2 suffix');
+  });
+
+  it('occurrenceIndex 1 always equals bare fingerprint for backward SeenStore compat', () => {
+    // Simulates: tx was unique in a prior run (stored as baseFp). In this run,
+    // a second copy appears. The first copy must still resolve to baseFp so that
+    // the SeenStore lookup finds the previously stored entry.
+    const tx1 = { ...baseTx };
+    const tx2 = { ...baseTx };
+    assignOccurrenceKeys([tx1, tx2]);
+
+    const baseFp = fingerprint(baseTx);
+    const store = new SeenStore('/tmp');
+    store.upsert(baseFp, contentHash(baseTx)); // simulate prior run storing just baseFp
+
+    // tx1 (occurrenceIndex 1) must be classified as unchanged, not created
+    assert.equal(classifyTransaction(store, tx1.dedupKey, contentHash(tx1)), 'unchanged',
+      'first occurrence matches prior SeenStore entry');
+    // tx2 (occurrenceIndex 2) has a new key → classified as created
+    assert.equal(classifyTransaction(store, tx2.dedupKey, contentHash(tx2)), 'created',
+      'second occurrence is new → created');
+  });
+
+  it('is a no-op on an empty array', () => {
+    assert.doesNotThrow(() => assignOccurrenceKeys([]));
+  });
+
+  it('mutates the input array in place', () => {
+    const tx = { ...baseTx };
+    const arr = [tx];
+    assignOccurrenceKeys(arr);
+    assert.ok('dedupKey' in tx, 'tx should have dedupKey after mutation');
   });
 });
 

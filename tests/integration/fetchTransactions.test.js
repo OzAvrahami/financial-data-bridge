@@ -16,7 +16,8 @@ import { FakeBrowserManager } from '../helpers/fakeBrowserManager.js';
 import { FakeSessionStore } from '../helpers/fakeSessionStore.js';
 import { FakeCheckpointStore } from '../helpers/fakeCheckpointStore.js';
 import { FakeSeenStore } from '../helpers/fakeSeenStore.js';
-import { sampleTransactions } from '../fixtures/transactions.js';
+import { sampleTransactions, duplicateBusinessFieldTransactions } from '../fixtures/transactions.js';
+import { fingerprint } from '../../src/infrastructure/dedup.js';
 
 // Explicit credentials passed to every call so tests don't depend on env vars.
 const TEST_CREDS = { username: 'test_user', password: 'test_pass', accountId: 'test-account' };
@@ -388,5 +389,121 @@ describe('fetchTransactions — execution report', () => {
     assert.equal(snap.totalRuns, 1);
     assert.equal(snap.successfulRuns, 1);
     assert.equal(snap.totalTransactionsFetched, sampleTransactions.length);
+  });
+});
+
+// ── Business-field duplicate handling ─────────────────────────────────────────
+//
+// Covers the real TOPSTEP scenario: two separate transactions that are completely
+// indistinguishable by their visible business fields. The scraper clicks two
+// distinct DOM rows but extracts identical data from both popups.
+//
+// The desired outcome:
+//   - Both transactions reach the export list (not collapsed by within-run dedup).
+//   - Each receives a distinct dedupKey: baseFp and baseFp|#2.
+//   - Both dedupKeys are stored in the SeenStore after the run.
+//   - On a second run with both transactions present, neither is re-exported.
+
+describe('fetchTransactions — business-field duplicates', () => {
+  it('exports both transactions when two transactions share all business fields', async () => {
+    const deps = makeDeps({
+      providerOpts: {
+        fetchResult: { transactions: duplicateBusinessFieldTransactions, warnings: [] },
+      },
+    });
+
+    const { transactions, report } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true },
+      deps
+    );
+
+    assert.equal(transactions.length, 2, 'both transactions must reach the export list');
+    assert.equal(report.duplicatesSkipped, 0, 'within-run dedup must not collapse them');
+    assert.equal(report.createdCount, 2);
+  });
+
+  it('assigns distinct dedupKeys to the two identical transactions', async () => {
+    const deps = makeDeps({
+      providerOpts: {
+        fetchResult: { transactions: duplicateBusinessFieldTransactions, warnings: [] },
+      },
+    });
+
+    const { transactions } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true },
+      deps
+    );
+
+    assert.equal(transactions.length, 2);
+    assert.notEqual(transactions[0].dedupKey, transactions[1].dedupKey,
+      'each occurrence must have a distinct dedupKey');
+
+    const baseFp = fingerprint(duplicateBusinessFieldTransactions[0]);
+    assert.equal(transactions[0].dedupKey, baseFp,          'first: bare fingerprint');
+    assert.equal(transactions[1].dedupKey, `${baseFp}|#2`,  'second: |#2 suffix');
+  });
+
+  it('stores both dedupKeys in the SeenStore so neither is re-exported on the next run', async () => {
+    const deps = makeDeps({
+      providerOpts: {
+        fetchResult: { transactions: duplicateBusinessFieldTransactions, warnings: [] },
+      },
+    });
+
+    await fetchTransactions({ credentials: TEST_CREDS, skipExport: true }, deps);
+
+    const baseFp = fingerprint(duplicateBusinessFieldTransactions[0]);
+    assert.ok(deps.seenStore.has(baseFp),          'baseFp stored in SeenStore');
+    assert.ok(deps.seenStore.has(`${baseFp}|#2`),  'baseFp|#2 stored in SeenStore');
+  });
+
+  it('skips both transactions on second run when SeenStore already holds both keys', async () => {
+    const baseFp = fingerprint(duplicateBusinessFieldTransactions[0]);
+    const { contentHash } = await import('../../src/infrastructure/dedup.js');
+    const ch = contentHash(duplicateBusinessFieldTransactions[0]);
+
+    // Pre-seed SeenStore as if run 1 already exported both transactions.
+    const seededStore = { [baseFp]: ch, [`${baseFp}|#2`]: ch };
+    const deps = makeDeps({
+      providerOpts: {
+        fetchResult: { transactions: duplicateBusinessFieldTransactions, warnings: [] },
+      },
+    });
+    // Replace the default empty FakeSeenStore with one pre-seeded with both keys.
+    deps.seenStore = new (await import('../helpers/fakeSeenStore.js')).FakeSeenStore(seededStore);
+
+    const { transactions, report } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true },
+      deps
+    );
+
+    assert.equal(transactions.length, 0, 'nothing new to export');
+    assert.equal(report.unchangedCount, 2, 'both classified as unchanged');
+  });
+
+  it('occurrenceIndex 1 matches a SeenStore entry written as a bare fingerprint (backward compat)', async () => {
+    // Simulates: in a prior run only ONE TOPSTEP was present → stored as baseFp (no suffix).
+    // In this run, TWO TOPSTEPs are present. The first must still match the SeenStore entry.
+    const baseFp = fingerprint(duplicateBusinessFieldTransactions[0]);
+    const { contentHash } = await import('../../src/infrastructure/dedup.js');
+    const ch = contentHash(duplicateBusinessFieldTransactions[0]);
+
+    const seededStore = { [baseFp]: ch }; // only baseFp, no "|#2" entry
+    const deps = makeDeps({
+      providerOpts: {
+        fetchResult: { transactions: duplicateBusinessFieldTransactions, warnings: [] },
+      },
+    });
+    deps.seenStore = new (await import('../helpers/fakeSeenStore.js')).FakeSeenStore(seededStore);
+
+    const { transactions, report } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true },
+      deps
+    );
+
+    assert.equal(transactions.length, 1,  'only the new second occurrence is exported');
+    assert.equal(report.createdCount, 1,  'second occurrence is created');
+    assert.equal(report.unchangedCount, 1, 'first occurrence recognized as unchanged');
+    assert.equal(transactions[0].dedupKey, `${baseFp}|#2`, 'exported transaction is the second occurrence');
   });
 });

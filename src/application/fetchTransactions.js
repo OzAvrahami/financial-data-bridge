@@ -2,7 +2,7 @@ import { join } from 'path';
 import { BrowserManager } from '../core/BrowserManager.js';
 import { SessionStore } from '../infrastructure/sessionStore.js';
 import { CheckpointStore } from '../infrastructure/checkpointStore.js';
-import { SeenStore, fingerprint, contentHash, classifyTransaction } from '../infrastructure/dedup.js';
+import { SeenStore, fingerprint, contentHash, classifyTransaction, assignOccurrenceKeys } from '../infrastructure/dedup.js';
 import { logger } from '../infrastructure/logger.js';
 import { withRetry } from '../infrastructure/retry.js';
 import { metrics } from '../infrastructure/metrics.js';
@@ -248,6 +248,12 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     // ── Merge prior (checkpoint) + this run's transactions ────────────────
     const allTransactions = [...priorTransactions, ...fetchedTransactions];
 
+    // ── Assign occurrence-aware dedupKey to every transaction ─────────────
+    // Must happen before the dedup loop so that two identical business-field
+    // transactions (e.g. two recurring charges at the same merchant) each
+    // receive a distinct dedupKey rather than collapsing into one.
+    assignOccurrenceKeys(allTransactions);
+
     report.transactionsFetched        = fetchedTransactions.length;
     report.transactionsSkipped        = providerWarnings.length;
     report.totalTransactionsConsidered = allTransactions.length;
@@ -267,7 +273,8 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
     // ── Deduplication ─────────────────────────────────────────────────────
     // Classify each transaction as created / updated / unchanged.
-    // Also deduplicate within this run (same dedupKey appearing twice).
+    // Uses tx.dedupKey (set by assignOccurrenceKeys above) as the canonical
+    // identity so that business-field duplicates get distinct keys.
     const seenInRun       = new Set();
     const exportedTxs     = []; // created + updated — emitted to caller and export file
     let createdCount      = 0;
@@ -276,16 +283,16 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     let withinRunDupCount = 0;
 
     for (const tx of allTransactions) {
-      const fp = fingerprint(tx);
+      const key = tx.dedupKey;
 
-      if (seenInRun.has(fp)) {
+      if (seenInRun.has(key)) {
         withinRunDupCount++;
         continue;
       }
-      seenInRun.add(fp);
+      seenInRun.add(key);
 
       const ch   = contentHash(tx);
-      const kind = classifyTransaction(seenStore, fp, ch, fullFetch);
+      const kind = classifyTransaction(seenStore, key, ch, fullFetch);
 
       if (kind === 'created') {
         createdCount++;
@@ -333,7 +340,7 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
     // ── Update seen store ─────────────────────────────────────────────────
     if (!fullFetch) {
-      for (const tx of exportedTxs) seenStore.upsert(fingerprint(tx), contentHash(tx));
+      for (const tx of exportedTxs) seenStore.upsert(tx.dedupKey, contentHash(tx));
       await seenStore.save(providerName, accountId);
     }
 

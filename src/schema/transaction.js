@@ -14,6 +14,12 @@
  * @property {string} chargeCurrency    - Currency the card is billed in
  * @property {string} transactionType   - Provider-specific type string (e.g. 'רגיל', 'תשלומים')
  * @property {string} status            - 'pending' | 'completed'
+ * @property {string} dedupKey          - Canonical identity key set by assignOccurrenceKeys().
+ *                                        Equals fingerprint(tx) for unique transactions.
+ *                                        Equals fingerprint(tx)+"|#N" for the Nth occurrence of
+ *                                        a business-field duplicate within the same fetch batch.
+ *                                        Used for SeenStore lookup, within-run dedup, and
+ *                                        the finance system external_id. Empty until assigned.
  * @property {Object} raw               - Original provider data, unmodified
  */
 
@@ -31,6 +37,7 @@ export function createTransaction(fields = {}) {
     chargeCurrency: 'ILS',
     transactionType: '',
     status: 'pending',
+    dedupKey: '',
     raw: {},
     ...fields,
   };
