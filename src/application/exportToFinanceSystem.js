@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 function shouldSendTransaction(transaction) {
     if (!transaction) return false;
@@ -29,21 +32,30 @@ export async function exportToFinanceSystem(transactions) {
             continue;
         }
 
+        const digits = transaction.accountId.replace(/\D/g, '');
+        const last4 = digits.slice(-4);
+
         const payload = {
             type: "expense",
             amount: transaction.chargeAmount,
             date: transaction.transactionDate,
             description: transaction.merchantName,
             charge_date: transaction.chargeDate,
-            category_id: "",
-            payment_source_id: "",
+            //category_id: null,
+            //payment_source_id: null,
+            payment_source_name: transaction.accountId,
             currency: transaction.currency,
-            notes: "",
-            tags: "",
-            external_id: "",
+            original_amount: transaction.amount,
+            //exchange_rate: null,
+            //notes: null,
+            //tags: [],
+            external_id: `${last4}-${transaction.transactionDate}-${transaction.chargeAmount}-${transaction.merchantName.slice(0,10)}`,
+            
         };
 
-        const response = await fetch("apiUrl", {
+        console.log("Sending payload:", JSON.stringify(payload, null, 2));
+
+        const response = await fetch(apiUrl, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
