@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRunReport, finalizeReport } from '../../../src/schema/runReport.js';
+import { createRunReport, finalizeReport } from '../../../packages/bridge-core/src/schema/runReport.js';
 
 describe('createRunReport', () => {
   it('sets provider and accountId from arguments', () => {

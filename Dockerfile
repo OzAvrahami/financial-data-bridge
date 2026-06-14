@@ -7,8 +7,8 @@ RUN npm ci --omit=dev
 
 COPY . .
 
-RUN mkdir -p .sessions .checkpoints .seen exports
+RUN mkdir -p runtime/sessions runtime/checkpoints runtime/seen runtime/exports
 
 EXPOSE 3000
 
-CMD ["node", "src/api/index.js"]
+CMD ["node", "packages/bridge-core/src/api/index.js"]

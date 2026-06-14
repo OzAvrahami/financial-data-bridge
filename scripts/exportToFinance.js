@@ -20,7 +20,7 @@ import dotenv from 'dotenv';
 import {
   runFinanceExport,
   FinanceExportInputError,
-} from '../src/application/runFinanceExport.js';
+} from '../packages/bridge-core/src/application/runFinanceExport.js';
 
 dotenv.config();
 

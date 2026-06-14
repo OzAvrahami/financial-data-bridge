@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { metrics } from '../../../src/infrastructure/metrics.js';
-import { createRunReport, finalizeReport } from '../../../src/schema/runReport.js';
+import { metrics } from '../../../packages/bridge-core/src/infrastructure/metrics.js';
+import { createRunReport, finalizeReport } from '../../../packages/bridge-core/src/schema/runReport.js';
 
 // Reset metrics between tests so they don't interfere within this file's process.
 beforeEach(() => metrics.reset());

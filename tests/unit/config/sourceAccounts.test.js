@@ -13,7 +13,7 @@ import {
   normalizeAccount,
   resolveCredentials,
   isMultiAccountConfigured,
-} from '../../../src/config/sourceAccounts.js';
+} from '../../../packages/bridge-core/src/config/sourceAccounts.js';
 
 // A config with no accounts file path that exists → forces env/default resolution.
 const SINGLE_CONFIG = {

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createTransaction } from '../../../src/schema/transaction.js';
+import { createTransaction } from '../../../packages/bridge-core/src/schema/transaction.js';
 
 describe('createTransaction', () => {
   it('returns all required fields with safe defaults', () => {

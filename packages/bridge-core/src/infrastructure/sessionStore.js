@@ -10,7 +10,7 @@ import { logger } from './logger.js';
  * This isolates sessions when multiple accounts per provider are needed later.
  */
 export class SessionStore {
-  constructor(storageDir = '.sessions') {
+  constructor(storageDir = 'runtime/sessions') {
     this.storageDir = storageDir;
   }
 

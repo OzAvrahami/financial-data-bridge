@@ -11,14 +11,14 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchAllAccounts } from '../../src/application/fetchAllAccounts.js';
-import { fetchTransactions } from '../../src/application/fetchTransactions.js';
+import { fetchAllAccounts } from '../../packages/bridge-core/src/application/fetchAllAccounts.js';
+import { fetchTransactions } from '../../packages/bridge-core/src/application/fetchTransactions.js';
 import { createFakeProvider } from '../helpers/fakeProvider.js';
 import { FakeBrowserManager } from '../helpers/fakeBrowserManager.js';
 import { FakeSessionStore } from '../helpers/fakeSessionStore.js';
 import { FakeCheckpointStore } from '../helpers/fakeCheckpointStore.js';
 import { FakeSeenStore } from '../helpers/fakeSeenStore.js';
-import { SeenStore, fingerprint } from '../../src/infrastructure/dedup.js';
+import { SeenStore, fingerprint } from '../../packages/bridge-core/src/infrastructure/dedup.js';
 import { sampleTransactions } from '../fixtures/transactions.js';
 
 // Fresh deep copies per account so in-place metadata stamping never leaks between accounts.

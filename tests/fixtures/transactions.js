@@ -1,4 +1,4 @@
-import { createTransaction } from '../../src/schema/transaction.js';
+import { createTransaction } from '../../packages/bridge-core/src/schema/transaction.js';
 
 /** Reusable sample normalized transactions for use in multiple test files. */
 export const sampleTransactions = [

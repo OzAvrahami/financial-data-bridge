@@ -13,8 +13,8 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from '../../src/api/server.js';
-import { metrics } from '../../src/infrastructure/metrics.js';
+import { createServer } from '../../packages/bridge-core/src/api/server.js';
+import { metrics } from '../../packages/bridge-core/src/infrastructure/metrics.js';
 
 // ── Test server lifecycle ─────────────────────────────────────────────────────
 
@@ -94,7 +94,7 @@ describe('GET /metrics', () => {
     metrics.reset();
 
     // Simulate a recorded run
-    const { createRunReport, finalizeReport } = await import('../../src/schema/runReport.js');
+    const { createRunReport, finalizeReport } = await import('../../packages/bridge-core/src/schema/runReport.js');
     const r = createRunReport({ provider: 'cal' });
     r.transactionsFetched = 7;
     finalizeReport(r, { status: 'success' });
@@ -155,7 +155,7 @@ describe('API key authentication', () => {
     //
     // Instead, test the middleware behavior via a manual express app:
     const express = (await import('express')).default;
-    const { config } = await import('../../src/config.js');
+    const { config } = await import('../../packages/bridge-core/src/config.js');
 
     // Temporarily override config.api.key for this test suite
     const originalKey = config.api.key;

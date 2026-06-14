@@ -2,11 +2,11 @@
 
 ## Start command
 
-The production start command is `node src/api/index.js` (API mode).
-The Dockerfile `CMD` and `package.json` `start` script both point here.
+The production start command is `node packages/bridge-core/src/api/index.js`
+(API mode). The Dockerfile `CMD` and `package.json` `start` script both point here.
 
-Do **not** use `node index.js` (CLI mode) on Railway — it exits after one run
-and Railway will restart it in a loop.
+Do **not** use `node apps/cli/index.js` (CLI mode) on Railway — it exits after one
+run and Railway will restart it in a loop.
 
 ## Required environment variables
 

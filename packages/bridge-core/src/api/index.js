@@ -1,6 +1,10 @@
 import { createServer } from './server.js';
 import { config } from '../config.js';
 import { logger } from '../infrastructure/logger.js';
+import { migrateRuntimeStateOnce } from '../infrastructure/runtimeMigration.js';
+
+// Non-destructive: copy any legacy runtime state into runtime/ before serving.
+migrateRuntimeStateOnce();
 
 const port = config.api.port;
 const app = createServer();

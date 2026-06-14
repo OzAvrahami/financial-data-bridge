@@ -10,14 +10,14 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchTransactions } from '../../src/application/fetchTransactions.js';
+import { fetchTransactions } from '../../packages/bridge-core/src/application/fetchTransactions.js';
 import { createFakeProvider } from '../helpers/fakeProvider.js';
 import { FakeBrowserManager } from '../helpers/fakeBrowserManager.js';
 import { FakeSessionStore } from '../helpers/fakeSessionStore.js';
 import { FakeCheckpointStore } from '../helpers/fakeCheckpointStore.js';
 import { FakeSeenStore } from '../helpers/fakeSeenStore.js';
 import { sampleTransactions, duplicateBusinessFieldTransactions } from '../fixtures/transactions.js';
-import { fingerprint } from '../../src/infrastructure/dedup.js';
+import { fingerprint } from '../../packages/bridge-core/src/infrastructure/dedup.js';
 
 // Explicit credentials passed to every call so tests don't depend on env vars.
 const TEST_CREDS = { username: 'test_user', password: 'test_pass', accountId: 'test-account' };
@@ -363,7 +363,7 @@ describe('fetchTransactions — execution report', () => {
   it('report status is "failed" when the run throws', async () => {
     // We can't easily inspect the report when it throws, but we can verify
     // that metrics records a failed run
-    const { metrics } = await import('../../src/infrastructure/metrics.js');
+    const { metrics } = await import('../../packages/bridge-core/src/infrastructure/metrics.js');
     metrics.reset();
 
     const deps = makeDeps({ providerOpts: { fetchError: new Error('fatal') } });
@@ -377,7 +377,7 @@ describe('fetchTransactions — execution report', () => {
   });
 
   it('metrics records a successful run', async () => {
-    const { metrics } = await import('../../src/infrastructure/metrics.js');
+    const { metrics } = await import('../../packages/bridge-core/src/infrastructure/metrics.js');
     metrics.reset();
 
     const deps = makeDeps({
@@ -459,7 +459,7 @@ describe('fetchTransactions — business-field duplicates', () => {
 
   it('skips both transactions on second run when SeenStore already holds both keys', async () => {
     const baseFp = fingerprint(duplicateBusinessFieldTransactions[0]);
-    const { contentHash } = await import('../../src/infrastructure/dedup.js');
+    const { contentHash } = await import('../../packages/bridge-core/src/infrastructure/dedup.js');
     const ch = contentHash(duplicateBusinessFieldTransactions[0]);
 
     // Pre-seed SeenStore as if run 1 already exported both transactions.
@@ -485,7 +485,7 @@ describe('fetchTransactions — business-field duplicates', () => {
     // Simulates: in a prior run only ONE TOPSTEP was present → stored as baseFp (no suffix).
     // In this run, TWO TOPSTEPs are present. The first must still match the SeenStore entry.
     const baseFp = fingerprint(duplicateBusinessFieldTransactions[0]);
-    const { contentHash } = await import('../../src/infrastructure/dedup.js');
+    const { contentHash } = await import('../../packages/bridge-core/src/infrastructure/dedup.js');
     const ch = contentHash(duplicateBusinessFieldTransactions[0]);
 
     const seededStore = { [baseFp]: ch }; // only baseFp, no "|#2" entry

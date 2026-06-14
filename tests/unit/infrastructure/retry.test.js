@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { withRetry } from '../../../src/infrastructure/retry.js';
+import { withRetry } from '../../../packages/bridge-core/src/infrastructure/retry.js';
 
 describe('withRetry', () => {
   it('returns result immediately on first success', async () => {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { SessionStore } from '../../../src/infrastructure/sessionStore.js';
+import { SessionStore } from '../../../packages/bridge-core/src/infrastructure/sessionStore.js';
 
 let tmpDir;
 

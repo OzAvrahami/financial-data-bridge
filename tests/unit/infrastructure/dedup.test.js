@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { fingerprint, contentHash, classifyTransaction, assignOccurrenceKeys, SeenStore } from '../../../src/infrastructure/dedup.js';
-import { createTransaction } from '../../../src/schema/transaction.js';
+import { fingerprint, contentHash, classifyTransaction, assignOccurrenceKeys, SeenStore } from '../../../packages/bridge-core/src/infrastructure/dedup.js';
+import { createTransaction } from '../../../packages/bridge-core/src/schema/transaction.js';
 
 // ── Shared fixture ────────────────────────────────────────────────────────────
 

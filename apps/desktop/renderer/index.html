@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Lock down what the renderer may load. Scripts/styles from our files only. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self';" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Financial Data Bridge</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Financial Data Bridge</h1>
+    <div class="status" id="status-area">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Starting…</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- Environment / status -->
+    <section class="card" id="env-card">
+      <h2>Environment</h2>
+      <dl class="kv" id="env-list">
+        <dt>Status</dt><dd id="env-status">—</dd>
+        <dt>Mode</dt><dd id="env-mode">—</dd>
+        <dt>Node</dt><dd id="env-node">—</dd>
+        <dt>Electron</dt><dd id="env-electron">—</dd>
+      </dl>
+    </section>
+
+    <!-- Source accounts -->
+    <section class="card" id="accounts-card">
+      <h2>Source Accounts</h2>
+      <ul class="accounts" id="accounts-list">
+        <li class="muted">Loading…</li>
+      </ul>
+    </section>
+
+    <!-- Actions -->
+    <section class="card actions-card">
+      <h2>Actions</h2>
+      <div class="actions">
+        <button id="btn-fetch-all" class="btn btn-primary">Fetch All Accounts</button>
+        <button id="btn-fetch-default" class="btn btn-secondary">Fetch Default Account</button>
+        <button id="btn-clear-log" class="btn btn-ghost">Clear Log</button>
+      </div>
+      <p class="hint">Mock actions — buttons log activity; no real fetch runs yet.</p>
+    </section>
+
+    <!-- Last run summary placeholder -->
+    <section class="card" id="summary-card">
+      <h2>Last Run Summary</h2>
+      <div id="summary-body" class="muted">No runs yet.</div>
+    </section>
+
+    <!-- Run log / output -->
+    <section class="card log-card">
+      <h2>Run Log</h2>
+      <pre id="log" class="log" aria-live="polite"></pre>
+    </section>
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

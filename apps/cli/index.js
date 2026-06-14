@@ -1,7 +1,8 @@
-import { fetchTransactions } from './src/application/fetchTransactions.js';
-import { fetchAllAccounts } from './src/application/fetchAllAccounts.js';
-import { logger } from './src/infrastructure/logger.js';
-import { config } from './src/config.js';
+import { fetchTransactions } from '../../packages/bridge-core/src/application/fetchTransactions.js';
+import { fetchAllAccounts } from '../../packages/bridge-core/src/application/fetchAllAccounts.js';
+import { migrateRuntimeStateOnce } from '../../packages/bridge-core/src/infrastructure/runtimeMigration.js';
+import { logger } from '../../packages/bridge-core/src/infrastructure/logger.js';
+import { config } from '../../packages/bridge-core/src/config.js';
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 function getArg(flag) {
@@ -66,6 +67,10 @@ function printCombinedSummary(combined) {
 }
 
 async function main() {
+  // Non-destructive: copy any legacy .seen/.sessions/.checkpoints/exports state
+  // into runtime/ before fetching, so the path move never triggers a re-fetch.
+  migrateRuntimeStateOnce();
+
   const allAccounts = hasFlag('--all-accounts');
   const resume      = hasFlag('--resume');
   const fullFetch   = hasFlag('--full-fetch');

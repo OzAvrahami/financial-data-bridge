@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { CheckpointStore } from '../../../src/infrastructure/checkpointStore.js';
+import { CheckpointStore } from '../../../packages/bridge-core/src/infrastructure/checkpointStore.js';
 
 let tmpDir;
 let store;

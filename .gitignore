@@ -26,17 +26,21 @@ playwright/.cache/
 *.webm
 
 # ── Runtime state (generated locally) ────────────────────────────────────────
-# Seen-state (dedup fingerprints derived from real transactions) and resume
-# checkpoints (may contain transaction data). Local runtime state only.
+# Everything under runtime/ is local state (seen dedup fingerprints, sessions,
+# checkpoints, and generated transaction exports — all private). The folder is
+# kept via runtime/.gitkeep; its contents are ignored.
+runtime/*
+!runtime/.gitkeep
+
+# Legacy pre-restructure locations — keep ignored if they still exist locally.
 .seen/
+.sessions/
 .checkpoints/
 .data/
+exports/
 
 # ── Financial / private generated data ───────────────────────────────────────
-# Generated transaction exports contain real financial data.
-# The directory is kept via exports/.gitkeep; its contents are ignored.
-exports/*
-!exports/.gitkeep
+# (Exports now live under runtime/exports/ — covered by the runtime/ rule above.)
 
 # ── Logs & debug output ──────────────────────────────────────────────────────
 logs/

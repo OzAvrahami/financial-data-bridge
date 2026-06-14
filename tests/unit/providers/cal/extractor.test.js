@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectPendingMarker } from '../../../../src/providers/cal/extractor.js';
+import { detectPendingMarker } from '../../../../packages/bridge-core/src/providers/cal/extractor.js';
 
 // detectPendingMarker drives the skip decision in the CAL fetch loop:
 // a non-null result means the transaction is pending/unfinalized and is skipped

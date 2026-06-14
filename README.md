@@ -1,183 +1,84 @@
-# Cal Credit Card Transaction Automation
+# Financial Data Bridge
 
-אוטומציה לשליפת עסקאות כרטיסי אשראי מאתר Cal Online באמצעות Playwright.
+Automated financial-data tooling: logs into provider websites (CAL today; designed
+for more), fetches and normalizes transactions, deduplicates them, writes JSON
+exports, and can push them to a finance system. Runs as a CLI, an HTTP API, or a
+local Desktop app.
 
-## תכונות
+## Repository layout
 
-- 🔐 התחברות אוטומטית לאתר Cal Online
-- 📅 סינון עסקאות לפי טווח תאריכים (ברירת מחדל: 4 ימים אחרונים)
-- 📊 שליפה אוטומטית של כל פרטי העסקאות
-- 💾 ייצוא לקובץ JSON
-- 🎯 חילוץ מדויק של כל הנתונים מכל עסקה (כולל עסקאות בדולר)
-
-## נתונים שנשלפים
-
-עבור כל עסקה:
-- **תאריך העסקה** - תאריך ושעת ביצוע העסקה
-- **שם בית העסק** - שם העסק בו בוצעה העסקה
-- **סכום העסקה** - הסכום המקורי (בדולר או שקלים)
-- **סוג העסקה** - רגיל/תשלומים/וכו'
-- **כרטיס** - שם הכרטיס (4 ספרות אחרונות)
-- **ענף בית העסק** - קטגוריה (מסעדות, מזון, וכו')
-- **תאריך חיוב** - מועד החיוב בפועל (אם קיים)
-- **סכום חיוב** - סכום החיוב בשקלים (אם שונה מסכום העסקה)
-
-## התקנה
-
-1. שכפל את הפרויקט:
-```bash
-git clone <repository-url>
-cd automation-cal
+```
+financial-data-bridge/
+├─ apps/
+│  ├─ cli/                # CLI entrypoint (npm run fetch / fetch:all)
+│  │  └─ index.js
+│  └─ desktop/            # Electron desktop app (npm run desktop)
+│     ├─ main.cjs
+│     ├─ preload.cjs
+│     └─ renderer/        # index.html, styles.css, renderer.js
+├─ packages/
+│  └─ bridge-core/        # All reusable business logic
+│     └─ src/
+│        ├─ api/          # Express server (npm start)
+│        ├─ application/  # use cases: fetchTransactions, fetchAllAccounts, export
+│        ├─ config/       # source-account configuration
+│        ├─ core/         # browser manager, provider registry, base provider
+│        ├─ infrastructure/  # dedup, stores, retry, metrics, logger, migration
+│        ├─ providers/    # provider implementations (cal/)
+│        ├─ schema/       # transaction + run-report models
+│        ├─ config.js
+│        └─ exporter.js
+├─ scripts/               # standalone scripts (exportToFinance.js)
+├─ tests/                 # unit / integration / helpers / fixtures
+├─ docs/                  # RUNBOOK.md, RAILWAY.md
+├─ runtime/               # local state (gitignored): seen/ sessions/ checkpoints/ exports/
+├─ accounts.config.example.json
+├─ Dockerfile
+├─ .env.example
+└─ package.json
 ```
 
-2. התקן תלויות:
+## Setup
+
 ```bash
 npm install
+cp .env.example .env   # then fill in CAL_USERNAME / CAL_PASSWORD
 ```
 
-3. צור קובץ `.env` על בסיס `.env.example`:
-```bash
-cp .env.example .env
-```
+See **[docs/RUNBOOK.md](docs/RUNBOOK.md)** for the full operations guide and
+**[docs/RAILWAY.md](docs/RAILWAY.md)** for deployment.
 
-4. ערוך את קובץ `.env` והוסף את פרטי ההתחברות שלך:
-```
-CAL_USERNAME=your_username_here
-CAL_PASSWORD=your_password_here
-```
+## Commands
 
-## שימוש
+| Command | What it does |
+|---------|--------------|
+| `npm run fetch` | Fetch the default account (one-shot CLI). |
+| `npm run fetch:all` | Fetch every configured source account sequentially. |
+| `npm run desktop` | Open the local Electron desktop dashboard. |
+| `npm start` | Start the HTTP API server. |
+| `npm run export:finance -- --file runtime/exports/<file>.json` | Preview a finance export (dry-run). Add `--execute` to send. |
+| `npm test` | Run the full test suite. |
 
-הרץ את הסקריפט:
-```bash
-npm start
-```
+## Multi-account configuration
 
-או:
-```bash
-node fetch-transactions.js
-```
+Define multiple source accounts (per provider) via `SOURCE_ACCOUNTS` (inline JSON)
+or an `accounts.config.json` file (copy `accounts.config.example.json`). Credentials
+are referenced by env-var name, never inlined. With no config, the single default
+CAL account is used. See docs/RUNBOOK.md.
 
-הסקריפט יבצע:
-1. התחברות לאתר Cal Online
-2. ניווט לדף "עסקאות לפי תאריך ביצוע"
-3. הפעלת סינון ל-4 ימים אחרונים
-4. שליפת כל העסקאות (לוחץ על כל עסקה ומחלץ את הפרטים המלאים)
-5. שמירה לקובץ JSON בתיקיית `exports/`
+## Runtime state
 
-**קובץ הפלט:** `exports/cal_YYYY-MM-DD.json`
+Local state (dedup "seen" state, sessions, checkpoints, exports) lives under
+`runtime/` and is gitignored. Legacy root folders (`.seen/`, `.sessions/`,
+`.checkpoints/`, `exports/`) are migrated automatically and non-destructively on
+first run — see docs/RUNBOOK.md §7.1.
 
-## התאמה אישית
+## Security
 
-### שינוי טווח התאריכים
+- `.env` and `accounts.config.json` are never committed and never read in the
+  desktop renderer (only in the Node/main process).
+- The desktop renderer is sandboxed (contextIsolation on, nodeIntegration off).
 
-בקובץ [fetch-transactions.js](fetch-transactions.js), שנה את השורה:
-```javascript
-await client.applyDateFilter(4); // 4 days back
-```
-
-למשל, עבור 7 ימים:
-```javascript
-await client.applyDateFilter(7);
-```
-
-### הרצה במצב headless
-
-בקובץ [fetch-transactions.js](fetch-transactions.js):
-```javascript
-await client.initialize({
-  headless: true,  // true = רקע ללא חלון דפדפן
-  slowMo: 50,
-});
-```
-
-## מבנה הפרויקט
-
-```
-automation-cal/
-├── fetch-transactions.js    # סקריפט ראשי להרצה
-├── utils/
-│   └── calClient.js         # מחלקה לניהול אוטומציה
-├── exports/                 # תיקיית קבצי פלט
-├── .env                     # פרטי התחברות (לא נכלל ב-git)
-├── .env.example            # דוגמה לקובץ .env
-├── package.json            # תלויות הפרויקט
-└── README.md               # מסמך זה
-```
-
-## דרישות מערכת
-
-- Node.js 14 ומעלה
-- Windows/Mac/Linux
-
-## תלויות
-
-- `@playwright/test` - אוטומציית דפדפן
-- `dotenv` - ניהול משתני סביבה
-
-## הערות חשובות
-
-- הסקריפט רץ עם דפדפן גלוי (`headless: false`) כדי לאפשר צפייה בתהליך
-- העסקאות נשמרות בפורמט JSON עם כל הפרטים
-- עסקאות "ממתינות" (הסכום לא סופי) לא יכללו תאריך חיוב או סכום חיוב
-- עסקאות בדולר יכללו גם את סכום העסקה המקורי וגם את סכום החיוב בשקלים
-
-## פורמט קובץ הפלט
-
-```json
-[
-  {
-    "transactionDate": "2025-11-22",
-    "cardName": "ויזה5304",
-    "businessName": "WOLT",
-    "expenseType": "מסעדות",
-    "amount": 129.9,
-    "issuer": "CAL",
-    "transactionType": "רגיל",
-    "details": "",
-    "chargeDate": "",
-    "chargeAmount": 0
-  },
-  {
-    "transactionDate": "2025-11-21",
-    "cardName": "ויזה5304",
-    "businessName": "MyFunded Futures",
-    "expenseType": "",
-    "amount": 77,
-    "issuer": "CAL",
-    "transactionType": "רגילה",
-    "details": "",
-    "chargeDate": "2025-12-02",
-    "chargeAmount": 260.14
-  }
-]
-```
-
-## פתרון בעיות
-
-### הסקריפט תקוע בהתחברות
-- בדוק שפרטי ההתחברות נכונים בקובץ `.env`
-- ייתכן שנדרש אימות דו-שלבי - בצע אותו ידנית בדפדפן הגלוי
-
-### לא נמצאו עסקאות
-- בדוק שיש עסקאות בטווח התאריכים המבוקש (ברירת מחדל: 4 ימים)
-- נסה להגדיל את טווח התאריכים
-
-### העסקאות לא נשלפות כראוי
-- הרץ במצב `headless: false` כדי לראות מה קורה
-- בדוק את הקונסולה לשגיאות
-
-## אבטחה
-
-⚠️ **חשוב:**
-- אל תשתף את קובץ `.env` עם אחרים
-- אל תעלה את קובץ `.env` ל-Git
-- השתמש באוטומציה באופן סביר
-
-## רישיון
+## License
 
 MIT
-
-## תרומה
-
-Pull Requests מתקבלים בברכה!

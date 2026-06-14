@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { providerRegistry } from '../../../src/core/providerRegistry.js';
+import { providerRegistry } from '../../../packages/bridge-core/src/core/providerRegistry.js';
 
 // Use test-scoped provider names to avoid collision with real providers
 // that may have been registered via the side-effect import in other modules.

@@ -7,15 +7,15 @@
 
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchTransactions } from '../../src/application/fetchTransactions.js';
-import { fingerprint, contentHash } from '../../src/infrastructure/dedup.js';
+import { fetchTransactions } from '../../packages/bridge-core/src/application/fetchTransactions.js';
+import { fingerprint, contentHash } from '../../packages/bridge-core/src/infrastructure/dedup.js';
 import { createFakeProvider } from '../helpers/fakeProvider.js';
 import { FakeBrowserManager } from '../helpers/fakeBrowserManager.js';
 import { FakeSessionStore } from '../helpers/fakeSessionStore.js';
 import { FakeCheckpointStore } from '../helpers/fakeCheckpointStore.js';
 import { FakeSeenStore } from '../helpers/fakeSeenStore.js';
 import { sampleTransactions } from '../fixtures/transactions.js';
-import { createTransaction } from '../../src/schema/transaction.js';
+import { createTransaction } from '../../packages/bridge-core/src/schema/transaction.js';
 
 const TEST_CREDS = { username: 'u', password: 'p', accountId: 'test-account' };
 

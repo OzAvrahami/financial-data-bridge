@@ -32,20 +32,23 @@ export const config = {
     earlyStopThreshold: parseInt(env('EARLY_STOP_THRESHOLD', '10'), 10),
   },
 
+  // Runtime/local state lives under runtime/ (see runtimeMigration.js for the
+  // non-destructive copy from the legacy .seen/.sessions/.checkpoints/exports
+  // locations). Each path remains individually overridable via env.
   export: {
-    path: env('EXPORT_PATH', 'exports'),
+    path: env('EXPORT_PATH', 'runtime/exports'),
   },
 
   session: {
-    storageDir: env('SESSION_DIR', '.sessions'),
+    storageDir: env('SESSION_DIR', 'runtime/sessions'),
   },
 
   checkpoint: {
-    dir: env('CHECKPOINT_DIR', '.checkpoints'),
+    dir: env('CHECKPOINT_DIR', 'runtime/checkpoints'),
   },
 
   seen: {
-    dir: env('SEEN_DIR', '.seen'),
+    dir: env('SEEN_DIR', 'runtime/seen'),
   },
 
   // Multi-account (source account) configuration.

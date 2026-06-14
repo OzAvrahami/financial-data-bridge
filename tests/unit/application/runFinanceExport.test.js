@@ -17,7 +17,7 @@ import {
   planFinanceExport,
   loadTransactionFile,
   FinanceExportInputError,
-} from '../../../src/application/runFinanceExport.js';
+} from '../../../packages/bridge-core/src/application/runFinanceExport.js';
 
 const COMPLETED_TX = {
   provider: 'CAL', accountId: 'acct', transactionDate: '2026-05-10',

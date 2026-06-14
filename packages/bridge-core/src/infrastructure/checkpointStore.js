@@ -12,7 +12,7 @@ import { join } from 'path';
  *   - Preserved on failure or interruption — used for resume on next run
  */
 export class CheckpointStore {
-  constructor(dir = '.checkpoints') {
+  constructor(dir = 'runtime/checkpoints') {
     this.dir = dir;
   }
 

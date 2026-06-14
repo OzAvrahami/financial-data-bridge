@@ -130,7 +130,7 @@ export function classifyTransaction(store, fp, ch, fullFetch = false) {
  *   contentHash set to null → treated as 'unchanged' by classifyTransaction.
  */
 export class SeenStore {
-  constructor(dir = '.seen') {
+  constructor(dir = 'runtime/seen') {
     this.dir = dir;
     this._entries = new Map(); // fp → { contentHash, lastSeenAt, updatedAt }
   }

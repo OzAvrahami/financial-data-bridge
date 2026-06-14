@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTransaction, detectCurrency, parseAmount } from '../../../../src/providers/cal/normalizer.js';
+import { normalizeTransaction, detectCurrency, parseAmount } from '../../../../packages/bridge-core/src/providers/cal/normalizer.js';
 
 const baseRaw = {
   businessName: 'SuperMarket',

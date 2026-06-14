@@ -19,13 +19,13 @@ End to end it:
 2. Navigates to the "transactions by date" page and filters to the last few days.
 3. Opens each transaction, extracts and normalizes the details.
 4. Deduplicates against previously-seen transactions (so reruns don't re-export the same rows).
-5. Writes the new/changed transactions to a JSON file in `exports/`.
+5. Writes the new/changed transactions to a JSON file in `runtime/exports/`.
 6. Separately, a second command reads that JSON file and **pushes the transactions to your
    finance API** (`exportToFinanceSystem`).
 
 There are **two ways to run it**:
-- **CLI mode** — one-shot fetch (`node index.js`), good for running locally on demand.
-- **API mode** — a long-running Express server (`node src/api/index.js`) that fetches on an
+- **CLI mode** — one-shot fetch (`node apps/cli/index.js`), good for running locally on demand.
+- **API mode** — a long-running Express server (`node packages/bridge-core/src/api/index.js`) that fetches on an
   HTTP request. This is the production/Railway mode.
 
 The fetch step and the finance-export step are **separate commands** — fetching does not
@@ -70,8 +70,8 @@ Then edit `.env` and fill in at least `CAL_USERNAME` and `CAL_PASSWORD` (see sec
 
 ## 4. Environment variables
 
-All variables are read in `src/config.js` (via `dotenv`) and in `scripts/exportToFinance.js`
-/ `src/application/exportToFinanceSystem.js`. Do **not** put real secrets in `.env.example`
+All variables are read in `packages/bridge-core/src/config.js` (via `dotenv`) and in `scripts/exportToFinance.js`
+/ `packages/bridge-core/src/application/exportToFinanceSystem.js`. Do **not** put real secrets in `.env.example`
 or in git — `.env` is gitignored.
 
 ### Required for fetching
@@ -102,10 +102,10 @@ or in git — `.env` is gitignored.
 | `DAYS_BACK` | How many days back to fetch. | `4` |
 | `INCREMENTAL` | Stop early once enough consecutive already-seen rows are found. | `true` |
 | `EARLY_STOP_THRESHOLD` | Consecutive already-seen rows before stopping. | `10` |
-| `EXPORT_PATH` | Folder for exported JSON files. | `exports` |
-| `SESSION_DIR` | Folder for saved login sessions (auth cookies). | `.sessions` |
-| `CHECKPOINT_DIR` | Folder for mid-run checkpoints (for `--resume`). | `.checkpoints` |
-| `SEEN_DIR` | Folder for dedup "seen" state. | `.seen` |
+| `EXPORT_PATH` | Folder for exported JSON files. | `runtime/exports` |
+| `SESSION_DIR` | Folder for saved login sessions (auth cookies). | `runtime/sessions` |
+| `CHECKPOINT_DIR` | Folder for mid-run checkpoints (for `--resume`). | `runtime/checkpoints` |
+| `SEEN_DIR` | Folder for dedup "seen" state. | `runtime/seen` |
 | `API_PORT` | Port for the Express API server. | `3000` |
 | `API_KEY` | If set, API requests must send a matching `X-API-Key` header. Empty = open. | _(empty)_ |
 | `LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error`. | `info` |
@@ -122,9 +122,9 @@ The everyday "pull my latest CAL transactions" command:
 npm run fetch
 ```
 
-This runs `node index.js` (CLI mode). It logs in (or reuses a saved session), fetches the
+This runs `node apps/cli/index.js` (CLI mode). It logs in (or reuses a saved session), fetches the
 last `DAYS_BACK` days (default 4), deduplicates, and writes new/changed transactions to
-`exports/`.
+`runtime/exports/`.
 
 To then push those transactions to your finance system, see section 8
 (`npm run export:finance`). Fetching alone does **not** send anything to the finance API.
@@ -133,15 +133,15 @@ To then push those transactions to your finance system, see section 8
 
 ## 6. Execution flow
 
-This is the real flow as implemented in `src/application/fetchTransactions.js` and
-`src/providers/cal/`:
+This is the real flow as implemented in `packages/bridge-core/src/application/fetchTransactions.js` and
+`packages/bridge-core/src/providers/cal/`:
 
-1. **Load config + credentials** (`src/config.js`). If `CAL_USERNAME`/`CAL_PASSWORD` are
+1. **Load config + credentials** (`packages/bridge-core/src/config.js`). If `CAL_USERNAME`/`CAL_PASSWORD` are
    missing, the run fails immediately with a clear error.
 2. **(Optional) load checkpoint** — only if `--resume` is passed; lets a previously
    interrupted run continue from where it stopped.
 3. **Load "seen" dedup state** — unless `--full-fetch` is passed.
-4. **Launch Chromium** and try to **restore a saved session** from `.sessions/`.
+4. **Launch Chromium** and try to **restore a saved session** from `runtime/sessions/`.
 5. **Validate session** — visits the CAL homepage and checks for the authenticated nav
    element. If valid, login is skipped. If not, it performs a **fresh login** (with one
    retry) and saves the new session.
@@ -157,8 +157,8 @@ This is the real flow as implemented in `src/application/fetchTransactions.js` a
    skipped (unfinalized)`.
 9. **Deduplicate** the remaining rows into created / updated / unchanged. Only created +
    updated are exported.
-10. **Export** the created/updated transactions to `exports/<provider>[_<account>]_<YYYY-MM-DD>.json`
-   (via a safe write-then-rename in `src/exporter.js`). If nothing is new, no file is written.
+10. **Export** the created/updated transactions to `runtime/exports/<provider>[_<account>]_<YYYY-MM-DD>.json`
+   (via a safe write-then-rename in `packages/bridge-core/src/exporter.js`). If nothing is new, no file is written.
 11. **Update the seen store**, **clear the checkpoint** (run completed), and **print a run
     summary** to the log.
 12. **Finance sync is a separate step** — run `npm run export:finance` against the exported
@@ -170,15 +170,42 @@ This is the real flow as implemented in `src/application/fetchTransactions.js` a
 
 | Folder | What's in it | Created by |
 |--------|--------------|------------|
-| `exports/` | Exported transaction JSON, named `<provider>[_<account>]_<YYYY-MM-DD>.json` (e.g. `cal_2026-06-01.json`). This is the file you feed to `export:finance`. | `src/exporter.js` |
-| `.sessions/` | Saved Playwright login state (auth cookies) per provider/account. Gitignored. Deleting forces a fresh login. | `SessionStore` |
-| `.checkpoints/` | Mid-run progress checkpoints used by `--resume`. Cleared on a successful run. | `CheckpointStore` |
-| `.seen/` | Deduplication state — which transactions have already been exported. | `SeenStore` |
+| `runtime/exports/` | Exported transaction JSON, named `<provider>[_<account>]_<YYYY-MM-DD>.json` (e.g. `cal_2026-06-01.json`). This is the file you feed to `export:finance`. | `packages/bridge-core/src/exporter.js` |
+| `runtime/sessions/` | Saved Playwright login state (auth cookies) per provider/account. Gitignored. Deleting forces a fresh login. | `SessionStore` |
+| `runtime/checkpoints/` | Mid-run progress checkpoints used by `--resume`. Cleared on a successful run. | `CheckpointStore` |
+| `runtime/seen/` | Deduplication state — which transactions have already been exported. | `SeenStore` |
 
 **Logs**: there is no log *file*. Logs are written to **stdout/stderr** by
-`src/infrastructure/logger.js` (errors → stderr, everything else → stdout). To save them,
+`packages/bridge-core/src/infrastructure/logger.js` (errors → stderr, everything else → stdout). To save them,
 redirect output yourself, e.g. `npm run fetch *> run.log` (PowerShell). Passwords and
 tokens are automatically redacted from log metadata.
+
+### 7.1 Runtime path migration (repo restructure)
+
+Runtime/local state moved from the project root into `runtime/`:
+
+| Old location (legacy) | New default (`runtime/`)   | Env override     |
+|-----------------------|----------------------------|------------------|
+| `.seen/`              | `runtime/seen/`            | `SEEN_DIR`       |
+| `.sessions/`          | `runtime/sessions/`       | `SESSION_DIR`    |
+| `.checkpoints/`       | `runtime/checkpoints/`    | `CHECKPOINT_DIR` |
+| `exports/`            | `runtime/exports/`        | `EXPORT_PATH`    |
+
+**Migration is automatic, one-time, and non-destructive.** On the first
+`npm run fetch` / `npm run fetch:all` / `npm start` after upgrading,
+`migrateRuntimeStateOnce()` (`packages/bridge-core/src/infrastructure/runtimeMigration.js`)
+runs at startup and:
+
+- **copies** any files from the old folders into the new `runtime/` folders;
+- **never overwrites** a file that already exists in the new location;
+- **never deletes** the old folders (you can remove them yourself once you've
+  confirmed everything works);
+- is **idempotent** — once migrated, later runs copy nothing.
+
+This guarantees the move does **not** look like an empty seen store, so it will
+**not** trigger an accidental full re-fetch or re-export. If you set the `*_DIR` /
+`EXPORT_PATH` env vars (e.g. on Railway with `/app/data/...`), those win and no
+migration is needed.
 
 ---
 
@@ -187,16 +214,18 @@ tokens are automatically redacted from log metadata.
 | Purpose | Command | When to use it |
 |---------|---------|----------------|
 | Fetch latest transactions (CLI) | `npm run fetch` | Normal daily/on-demand pull. |
-| Fetch for a specific account | `node index.js --account my_visa` | When you run more than one CAL account. |
-| Resume an interrupted run | `node index.js --resume` | A previous run crashed/was stopped partway. |
-| Full re-fetch (ignore dedup) | `node index.js --full-fetch` | Re-export everything, ignoring the seen store. |
-| Preview finance export (dry-run) | `npm run export:finance -- --file exports/cal_2026-06-01.json` | Always run first — shows what would be sent, sends nothing. |
-| Send to finance system (real) | `npm run export:finance -- --file exports/cal_2026-06-01.json --execute` | After verifying the dry-run; requires `FINANCE_API_URL` + `FINANCE_API_KEY`. |
+| Fetch all configured accounts | `npm run fetch:all` | Sequentially fetch every source account (see multi-account config). |
+| Fetch for a specific account | `node apps/cli/index.js --account my_visa` | When you run more than one CAL account. |
+| Open the Desktop app (local UI) | `npm run desktop` | Visual dashboard. See section 12. |
+| Resume an interrupted run | `node apps/cli/index.js --resume` | A previous run crashed/was stopped partway. |
+| Full re-fetch (ignore dedup) | `node apps/cli/index.js --full-fetch` | Re-export everything, ignoring the seen store. |
+| Preview finance export (dry-run) | `npm run export:finance -- --file runtime/exports/cal_2026-06-01.json` | Always run first — shows what would be sent, sends nothing. |
+| Send to finance system (real) | `npm run export:finance -- --file runtime/exports/cal_2026-06-01.json --execute` | After verifying the dry-run; requires `FINANCE_API_URL` + `FINANCE_API_KEY`. |
 | Start the API server | `npm start` | Production/long-running mode; exposes HTTP endpoints. |
 | Trigger a fetch via the API | `curl -X POST http://localhost:3000/transactions/fetch -H "Content-Type: application/json" -d '{\"daysBack\":4}'` | When running in API mode. Add `-H "X-API-Key: <key>"` if `API_KEY` is set. |
 | API health check | `curl http://localhost:3000/health` | Confirm the server is up. |
 | API run metrics | `curl http://localhost:3000/metrics` | See in-memory run stats (resets on restart). |
-| Clean generated output for a fresh test | `Remove-Item exports\*.json, exports\*.json.tmp -Force; Remove-Item logs\debug\* -Recurse -Force -ErrorAction SilentlyContinue` | Wipe previous exports + debug artifacts before re-running. Does **not** touch `.env`, `.sessions/`, `.seen/`, or `.checkpoints/`. |
+| Clean generated output for a fresh test | `Remove-Item runtime\exports\*.json, runtime\exports\*.json.tmp -Force; Remove-Item logs\debug\* -Recurse -Force -ErrorAction SilentlyContinue` | Wipe previous exports + debug artifacts before re-running. Does **not** touch `.env`, `runtime/sessions/`, `runtime/seen/`, or `runtime/checkpoints/`. |
 | Run all tests | `npm test` | Verify code after changes. |
 | Run unit tests only | `npm run test:unit` | Faster feedback loop. |
 | Run integration tests only | `npm run test:integration` | Exercise the fetch/resume/api flows. |
@@ -206,8 +235,8 @@ tokens are automatically redacted from log metadata.
 
 ### CLI vs API — which run command?
 
-- **`npm run fetch` (`node index.js`)** — runs once and exits. Use locally / on demand.
-- **`npm start` (`node src/api/index.js`)** — starts a server that runs until stopped and
+- **`npm run fetch` (`node apps/cli/index.js`)** — runs once and exits. Use locally / on demand.
+- **`npm start` (`node packages/bridge-core/src/api/index.js`)** — starts a server that runs until stopped and
   fetches on `POST /transactions/fetch`. Use for deployment (see `RAILWAY.md`). Do **not**
   use the CLI command as a long-running service; it exits after one run.
 
@@ -219,7 +248,7 @@ After `npm run fetch`:
 
 1. **Read the run summary** printed at the end (`Run summary ...`). Check `Status:` is
    `success` (or `partial` if some rows were skipped — see the listed warnings).
-2. **Look in `exports/`** for a freshly dated file (`cal_<today>.json`). If the summary says
+2. **Look in `runtime/exports/`** for a freshly dated file (`cal_<today>.json`). If the summary says
    "No new or updated transactions to export", that's normal — it means nothing changed
    since the last run.
 3. The summary also reports `Created`, `Updated`, `Unchanged`, `Duplicates`, whether the
@@ -245,7 +274,7 @@ After `npm start` (API mode):
 - CAL may require 2FA. Run with a visible browser to complete it manually:
   set `HEADLESS=false` in `.env`, then `npm run fetch`.
 - The code clears the stored session automatically on known auth failures. You can also
-  manually delete the `.sessions/` folder to force a clean login.
+  manually delete the `runtime/sessions/` folder to force a clean login.
 
 **Missing environment variable**
 - "Missing credentials for provider cal" → set `CAL_USERNAME` and `CAL_PASSWORD`.
@@ -260,7 +289,7 @@ After `npm start` (API mode):
 
 **File was not downloaded / no export file appeared**
 - If the summary says "No new or updated transactions to export", nothing changed — this is
-  expected. To force a full re-export, run `node index.js --full-fetch`.
+  expected. To force a full re-export, run `node apps/cli/index.js --full-fetch`.
 - If you expected older transactions, increase the window: set `DAYS_BACK` higher (e.g.
   `DAYS_BACK=30`) or pass it via the API body.
 - Watch the run to debug extraction: `HEADLESS=false` and `SLOW_MO=200`, plus `DEBUG=true`
@@ -270,18 +299,18 @@ After `npm start` (API mode):
 - The error includes the HTTP status and response body
   (`Failed to export transaction "...": <status> <body>`). Check `FINANCE_API_URL`,
   `FINANCE_API_KEY`, and that the endpoint accepts the payload shape in
-  `src/application/exportToFinanceSystem.js`.
+  `packages/bridge-core/src/application/exportToFinanceSystem.js`.
 - Only transactions with `status === "completed"` and `chargeAmount > 0` are sent; pending
   rows are skipped by design. Run the dry-run first to see counts.
 
 **Permissions problem**
-- If exports/session/checkpoint folders can't be written, ensure the process can write to
+- If the `runtime/` state folders can't be written, ensure the process can write to
   the project directory (or the `*_DIR` / `EXPORT_PATH` paths you configured). The app
   creates these folders automatically when it has permission.
 
 **Network / session problem**
 - Mid-run session loss is handled: the app re-authenticates once and continues. If it still
-  fails, the checkpoint is preserved — rerun with `node index.js --resume`.
+  fails, the checkpoint is preserved — rerun with `node apps/cli/index.js --resume`.
 - For flaky network, the login and navigation steps already retry once automatically.
 
 **API returns 401**
@@ -293,13 +322,13 @@ After `npm start` (API mode):
 
 - **README is outdated.** `README.md` (Hebrew) describes a v1 single-file layout
   (`fetch-transactions.js`, `utils/calClient.js`) that no longer exists. The real entry
-  points are `index.js` (CLI) and `src/api/index.js` (API). Trust this runbook + the code.
+  points are `apps/cli/index.js` (CLI) and `packages/bridge-core/src/api/index.js` (API). Trust this runbook + the code.
 - **No business logic in entry points.** Both CLI and API call the single use case
-  `fetchTransactions()` in `src/application/fetchTransactions.js`.
+  `fetchTransactions()` in `packages/bridge-core/src/application/fetchTransactions.js`.
 - **Provider pattern.** Providers register themselves via a side-effect import
-  (`src/providers/index.js`) into `providerRegistry`. Only `cal` is implemented; `max` is
+  (`packages/bridge-core/src/providers/index.js`) into `providerRegistry`. Only `cal` is implemented; `max` is
   stubbed in comments for future extension.
-- **Headless default is `true`** in code (`src/config.js`), contradicting the README which
+- **Headless default is `true`** in code (`packages/bridge-core/src/config.js`), contradicting the README which
   says it runs visibly. Set `HEADLESS=false` to watch it.
 - **Dedup identity** is occurrence-aware: `assignOccurrenceKeys()` gives each transaction a
   `dedupKey`, which is reused as the finance system's `external_id` for idempotent upserts.
@@ -307,7 +336,7 @@ After `npm start` (API mode):
   a `navigator.webdriver = undefined` init script. `SLOW_MO` further humanizes timing.
 - **Safe writes.** Exports use write-to-`.tmp`-then-rename so a crash never leaves a
   half-written JSON file.
-- **Pending/unfinalized transactions are skipped at extraction** (`src/providers/cal/extractor.js`).
+- **Pending/unfinalized transactions are skipped at extraction** (`packages/bridge-core/src/providers/cal/extractor.js`).
   `detectPendingMarker()` matches CAL's Hebrew markers read from `.info-section`,
   `.info-section .descrition` (CAL's class is spelled `descrition`), and `.payee-name`
   (falling back to the full panel text). Skips never reach the export and are reported as
@@ -316,7 +345,42 @@ After `npm start` (API mode):
 - **Finance export is intentionally a separate, opt-in step** and defaults to dry-run.
   Real sends require the explicit `--execute` flag.
 - **Deployment**: see `RAILWAY.md`. Production uses API mode with a persistent volume at
-  `/app/data` so `.sessions`, `.checkpoints`, `.seen`, and `exports` survive restarts.
+  `/app/data` so `runtime/sessions`, `runtime/checkpoints`, `runtime/seen`, and `runtime/exports` survive restarts.
+
+---
+
+## 12. Desktop app (local UI)
+
+A minimal Electron desktop shell lives in `apps/desktop/`. It opens a window with a
+dashboard: environment/status, the configured source accounts, action buttons,
+a run log, and a last-run summary placeholder.
+
+```bash
+# 1. Install dependencies (Electron is a devDependency; only needed once)
+npm install
+
+# 2. Launch the desktop app
+npm run desktop
+```
+
+**What you'll see:** a window titled *Financial Data Bridge* showing a "Ready"
+status, your configured source accounts (display names only), and three buttons
+— **Fetch All Accounts**, **Fetch Default Account**, **Clear Log**.
+
+**This step is a shell.** The fetch buttons are **mocked** — they append lines to
+the run log but do not run any real automation yet. Real fetch wiring comes in a
+later step.
+
+**Security model (important):**
+- The renderer is sandboxed (`contextIsolation: true`, `nodeIntegration: false`,
+  `sandbox: true`) and talks to Node only through a tiny preload bridge
+  (`apps/desktop/preload.cjs`).
+- Secrets never reach the UI. `.env` and `accounts.config.json` are read only in
+  the Electron **main** process (`apps/desktop/main.cjs`), and the account list is
+  **credential-stripped** before being sent to the renderer.
+
+**Files:** `apps/desktop/main.cjs` (main process + safe IPC), `apps/desktop/preload.cjs`
+(bridge), `apps/desktop/renderer/` (`index.html`, `styles.css`, `renderer.js`).
 
 ---
 
@@ -327,8 +391,8 @@ After `npm start` (API mode):
 - `.env.example` was **not** created — it already exists in the project.
 
 **Main run command**
-- `npm run fetch` (one-shot CLI fetch → writes JSON to `exports/`).
-- Then `npm run export:finance -- --file exports/<file>.json --execute` to push to your
+- `npm run fetch` (one-shot CLI fetch → writes JSON to `runtime/exports/`).
+- Then `npm run export:finance -- --file runtime/exports/<file>.json --execute` to push to your
   finance system.
 
 **Details you must fill in manually**
@@ -337,4 +401,4 @@ After `npm start` (API mode):
   not present in `.env.example`).
 - Confirm your Node.js version is **18+** (needed for built-in `fetch`).
 - The finance system's expected payload/response contract — verify it matches
-  `src/application/exportToFinanceSystem.js` before doing a real `--execute`.
+  `packages/bridge-core/src/application/exportToFinanceSystem.js` before doing a real `--execute`.
