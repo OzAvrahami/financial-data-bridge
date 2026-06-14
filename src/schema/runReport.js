@@ -10,6 +10,7 @@
  * @property {'running'|'success'|'partial'|'failed'} status
  * @property {number}   transactionsFetched       - rows extracted by provider in this run
  * @property {number}   transactionsSkipped       - rows the provider could not extract
+ * @property {number}   pendingSkippedCount       - rows skipped because they are pending/unfinalized
  * @property {number}   retryCount                - login/re-auth retries at application layer
  * @property {boolean}  reAuthOccurred
  * @property {boolean}  sessionReused
@@ -41,6 +42,7 @@ export function createRunReport({ provider, accountId = 'default' } = {}) {
     status: 'running',
     transactionsFetched: 0,
     transactionsSkipped: 0,
+    pendingSkippedCount: 0,
     retryCount: 0,
     reAuthOccurred: false,
     sessionReused: false,

@@ -58,7 +58,7 @@ export class CalProvider extends BaseProvider {
    * @param {Function} [opts.onProgress]      - Called after each extracted transaction.
    *                                            Signature: ({ index, total, transaction }) → Promise<boolean>
    *                                            Return false to stop the loop early.
-   * @returns {Promise<{ transactions: Transaction[], warnings: string[] }>}
+   * @returns {Promise<{ transactions: Transaction[], warnings: string[], pendingSkipped: number }>}
    */
   async fetchTransactions({ daysBack = 4, startIndex = 0, onProgress } = {}) {
     await withRetry(
@@ -77,6 +77,7 @@ export class CalProvider extends BaseProvider {
 
     const transactions = [];
     const warnings = [];
+    let pendingSkipped = 0;
 
     for (let i = startIndex; i < count; i++) {
       try {
@@ -96,6 +97,20 @@ export class CalProvider extends BaseProvider {
         await closeModal(this.page);
 
         if (raw) {
+          // Skip pending/unfinalized CAL transactions: their amount can still
+          // change, so exporting them now would create stale/duplicate data.
+          if (raw.pending) {
+            pendingSkipped++;
+            logger.info(`Row ${i + 1}/${count} skipped — pending/unfinalized CAL transaction`, {
+              provider: 'CAL',
+              row: i + 1,
+              merchant: raw.businessName || '(unknown)',
+              marker: raw.pendingMarker,
+              reason: 'pending/unfinalized CAL transaction',
+            });
+            continue;
+          }
+
           const normalized = normalizeTransaction(raw);
           transactions.push(normalized);
 
@@ -112,6 +127,10 @@ export class CalProvider extends BaseProvider {
       }
     }
 
-    return { transactions, warnings };
+    if (pendingSkipped > 0) {
+      logger.info(`${pendingSkipped} pending/unfinalized transaction(s) skipped`, { provider: 'CAL' });
+    }
+
+    return { transactions, warnings, pendingSkipped };
   }
 }

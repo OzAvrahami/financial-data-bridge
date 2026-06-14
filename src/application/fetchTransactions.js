@@ -243,7 +243,7 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
       }
     }
 
-    const { transactions: fetchedTransactions, warnings: providerWarnings = [] } = fetchResult;
+    const { transactions: fetchedTransactions, warnings: providerWarnings = [], pendingSkipped = 0 } = fetchResult;
 
     // ── Merge prior (checkpoint) + this run's transactions ────────────────
     const allTransactions = [...priorTransactions, ...fetchedTransactions];
@@ -256,6 +256,9 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
     report.transactionsFetched        = fetchedTransactions.length;
     report.transactionsSkipped        = providerWarnings.length;
+    // Counted separately from extraction failures (transactionsSkipped) and
+    // from unchanged/duplicate transactions.
+    report.pendingSkippedCount        = pendingSkipped;
     report.totalTransactionsConsidered = allTransactions.length;
     report.warnings.push(...priorWarnings, ...providerWarnings);
 

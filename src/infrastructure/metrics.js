@@ -15,6 +15,7 @@ const state = {
   totalReAuths: 0,
   totalTransactionsFetched: 0,
   totalTransactionsSkipped: 0,
+  totalPendingSkipped: 0,
   // Phase 4
   resumedRuns: 0,
   earlyStops: 0,
@@ -41,6 +42,7 @@ export const metrics = {
     if (report.reAuthOccurred) state.totalReAuths++;
     state.totalTransactionsFetched += report.transactionsFetched ?? 0;
     state.totalTransactionsSkipped += report.transactionsSkipped ?? 0;
+    state.totalPendingSkipped      += report.pendingSkippedCount ?? 0;
 
     if (report.status === 'success') state.successfulRuns++;
     else if (report.status === 'partial') state.partialRuns++;
@@ -71,6 +73,7 @@ export const metrics = {
       totalReAuths: 0,
       totalTransactionsFetched: 0,
       totalTransactionsSkipped: 0,
+      totalPendingSkipped: 0,
       resumedRuns: 0,
       earlyStops: 0,
       totalDuplicatesSkipped: 0,

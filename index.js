@@ -24,6 +24,7 @@ function printSummary(report) {
   logger.info(`  Duration:     ${((report.durationMs ?? 0) / 1000).toFixed(1)}s`);
   logger.info(`  Considered:   ${report.totalTransactionsConsidered} transaction(s)`);
   logger.info(`  Fetched:      ${report.transactionsFetched} (this run), ${report.transactionsSkipped} skipped`);
+  if (report.pendingSkippedCount > 0) logger.info(`  Pending:      ${report.pendingSkippedCount} skipped (unfinalized)`);
   if (report.createdCount > 0)   logger.info(`  Created:      ${report.createdCount} new transaction(s)`);
   if (report.updatedCount > 0)   logger.info(`  Updated:      ${report.updatedCount} changed transaction(s)`);
   if (report.unchangedCount > 0) logger.info(`  Unchanged:    ${report.unchangedCount} (excluded from export)`);
