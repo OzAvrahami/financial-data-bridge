@@ -48,7 +48,12 @@ import { providerRegistry } from '../core/providerRegistry.js';
 export async function fetchTransactions(opts = {}, _deps = {}) {
   const providerName  = opts.providerName  ?? config.provider;
   const credentials   = opts.credentials   ?? config.credentials[providerName];
-  const accountId     = opts.accountId     ?? credentials?.accountId ?? 'default';
+  // Stable source-account id used to scope all runtime state (session / seen /
+  // checkpoint files) and stamped onto exported transactions. `accountId` is kept
+  // as an alias so existing callers and the existing default flow are unchanged.
+  const providerAccountId = opts.providerAccountId ?? opts.accountId ?? credentials?.accountId ?? 'default';
+  const accountId     = providerAccountId;
+  const displayName   = opts.displayName ?? '';
   const browserConfig = opts.browserConfig ?? config.browser;
   const fetchConfig   = opts.fetchConfig   ?? config.fetch;
   const exportConfig  = opts.exportConfig  ?? config.export;
@@ -61,7 +66,7 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
   const incremental        = opts.incremental        ?? fetchConfig.incremental        ?? true;
   const earlyStopThreshold = opts.earlyStopThreshold ?? fetchConfig.earlyStopThreshold ?? 3;
 
-  const report = createRunReport({ provider: providerName, accountId });
+  const report = createRunReport({ provider: providerName, accountId, providerAccountId, displayName });
 
   // ── Validation ────────────────────────────────────────────────────────────
   if (!credentials?.username || !credentials?.password) {
@@ -253,6 +258,17 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     // transactions (e.g. two recurring charges at the same merchant) each
     // receive a distinct dedupKey rather than collapsing into one.
     assignOccurrenceKeys(allTransactions);
+
+    // ── Stamp source-account metadata on every transaction ────────────────
+    // Source attribution for export + downstream consumers. These fields are NOT
+    // part of fingerprint()/contentHash(), so stamping them never changes dedup
+    // identity or existing seen state. `provider` is only set when the provider
+    // did not already set it (CAL sets 'CAL'); we never overwrite it.
+    for (const tx of allTransactions) {
+      tx.providerAccountId   = providerAccountId;
+      tx.providerDisplayName = displayName;
+      if (!tx.provider) tx.provider = providerName;
+    }
 
     report.transactionsFetched        = fetchedTransactions.length;
     report.transactionsSkipped        = providerWarnings.length;

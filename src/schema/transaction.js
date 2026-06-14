@@ -3,7 +3,11 @@
  *
  * @typedef {Object} Transaction
  * @property {string} provider          - Provider identifier (e.g. 'CAL', 'MAX')
- * @property {string} accountId         - Card last-4 or account identifier
+ * @property {string} accountId         - Card last-4 or account identifier (provider-derived, e.g. card name)
+ * @property {string} providerAccountId - Stable source-account id this transaction was fetched under
+ *                                        (e.g. 'oz_cal', 'wife_cal'). Scopes runtime state and export
+ *                                        namespaces. Defaults to '' / 'default' for the single-account flow.
+ * @property {string} providerDisplayName - Human-friendly source-account label (e.g. 'Oz CAL'). Optional.
  * @property {string} transactionDate   - ISO date YYYY-MM-DD of when the charge occurred
  * @property {string} chargeDate        - ISO date YYYY-MM-DD of when it bills (empty if pending)
  * @property {string} merchantName      - Name of the merchant
@@ -27,6 +31,8 @@ export function createTransaction(fields = {}) {
   return {
     provider: '',
     accountId: '',
+    providerAccountId: '',
+    providerDisplayName: '',
     transactionDate: '',
     chargeDate: '',
     merchantName: '',

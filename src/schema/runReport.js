@@ -3,7 +3,9 @@
  *
  * @typedef {Object} RunReport
  * @property {string}   provider
- * @property {string}   accountId
+ * @property {string}   accountId                 - Stable source-account id (alias of providerAccountId)
+ * @property {string}   providerAccountId         - Stable source-account id this run fetched under
+ * @property {string}   displayName               - Human-friendly source-account label (optional)
  * @property {string}   startedAt                 - ISO timestamp
  * @property {string|null} finishedAt             - ISO timestamp, null while running
  * @property {number|null} durationMs             - wall-clock ms, null while running
@@ -32,10 +34,13 @@
  * @property {string|null} earlyStopReason
  */
 
-export function createRunReport({ provider, accountId = 'default' } = {}) {
+export function createRunReport({ provider, accountId = 'default', providerAccountId, displayName = '' } = {}) {
   return {
     provider,
     accountId,
+    // Defaults to accountId so single-account runs always carry a meaningful value.
+    providerAccountId: providerAccountId ?? accountId,
+    displayName,
     startedAt: new Date().toISOString(),
     finishedAt: null,
     durationMs: null,

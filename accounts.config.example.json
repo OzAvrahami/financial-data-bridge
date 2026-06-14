@@ -1,0 +1,20 @@
+[
+  {
+    "provider": "cal",
+    "providerAccountId": "oz_cal",
+    "displayName": "Oz CAL",
+    "credentials": {
+      "usernameEnv": "OZ_CAL_USERNAME",
+      "passwordEnv": "OZ_CAL_PASSWORD"
+    }
+  },
+  {
+    "provider": "cal",
+    "providerAccountId": "wife_cal",
+    "displayName": "Wife CAL",
+    "credentials": {
+      "usernameEnv": "WIFE_CAL_USERNAME",
+      "passwordEnv": "WIFE_CAL_PASSWORD"
+    }
+  }
+]

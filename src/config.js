@@ -48,6 +48,14 @@ export const config = {
     dir: env('SEEN_DIR', '.seen'),
   },
 
+  // Multi-account (source account) configuration.
+  // Accounts may be defined inline via the SOURCE_ACCOUNTS env var (JSON array)
+  // or in a JSON file at this path. If neither exists, the system falls back to
+  // the single default account derived from PROVIDER + {PROVIDER}_* credentials.
+  accounts: {
+    configPath: env('ACCOUNTS_CONFIG', 'accounts.config.json'),
+  },
+
   api: {
     port: parseInt(env('API_PORT', '3000'), 10),
     // If set, the API requires an X-API-Key header matching this value.

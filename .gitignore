@@ -10,6 +10,9 @@ node_modules/
 .env
 .env.*
 !.env.example
+# Local multi-account config (references env-var names; keep user copy private).
+# accounts.config.example.json is the safe, committed template.
+accounts.config.json
 
 # ── Playwright / browser / session artifacts ─────────────────────────────────
 # Session state files contain auth cookies — never commit these.

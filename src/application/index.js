@@ -15,6 +15,13 @@
 // (currently CAL); already the single fetch entry point used by CLI + API + tests.
 export { fetchTransactions } from './fetchTransactions.js';
 
+// Multi-account fetch — run each configured source account sequentially and
+// combine the results into one report.
+export { fetchAllAccounts } from './fetchAllAccounts.js';
+
+// Source-account configuration (generic, multi-provider).
+export { loadSourceAccounts, isMultiAccountConfigured } from '../config/sourceAccounts.js';
+
 // Finance export use case — load, plan (dry-run), and optionally send transactions.
 export {
   runFinanceExport,

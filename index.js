@@ -1,4 +1,5 @@
 import { fetchTransactions } from './src/application/fetchTransactions.js';
+import { fetchAllAccounts } from './src/application/fetchAllAccounts.js';
 import { logger } from './src/infrastructure/logger.js';
 import { config } from './src/config.js';
 
@@ -44,10 +45,42 @@ function printSummary(report) {
   logger.info(sep);
 }
 
+// ── Combined multi-account summary ─────────────────────────────────────────────
+function printCombinedSummary(combined) {
+  const sep = '═'.repeat(52);
+  logger.info(sep);
+  logger.info(`Multi-account run  accounts=${combined.summary.totalAccounts}  ` +
+              `ok=${combined.summary.succeeded}  failed=${combined.summary.failed}  ` +
+              `exported=${combined.summary.totalTransactionsExported}`);
+  logger.info(sep);
+  for (const acc of combined.accounts) {
+    const label = acc.displayName || `${acc.provider}/${acc.providerAccountId}`;
+    if (acc.status === 'failed') {
+      logger.warn(`  ✗ ${label}: failed — ${acc.error}`);
+    } else {
+      logger.info(`  ✓ ${label}: ${acc.status}, ${acc.transactionsExported} exported` +
+                  (acc.filePath ? `  → ${acc.filePath}` : ''));
+    }
+  }
+  logger.info(sep);
+}
+
 async function main() {
+  const allAccounts = hasFlag('--all-accounts');
+  const resume      = hasFlag('--resume');
+  const fullFetch   = hasFlag('--full-fetch');
+
+  // ── Multi-account flow ────────────────────────────────────────────────────
+  if (allAccounts) {
+    logger.info('Financial data bridge starting (all configured accounts)', { resume, fullFetch });
+    const combined = await fetchAllAccounts({ resume, fullFetch });
+    printCombinedSummary(combined);
+    if (combined.summary.failed > 0) process.exit(1);
+    return;
+  }
+
+  // ── Single-account flow (unchanged) ───────────────────────────────────────
   const accountId = getArg('--account') || process.env.ACCOUNT_ID || '';
-  const resume    = hasFlag('--resume');
-  const fullFetch = hasFlag('--full-fetch');
 
   const opts = {
     ...(accountId ? { accountId } : {}),
