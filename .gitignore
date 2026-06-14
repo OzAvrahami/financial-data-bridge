@@ -1,31 +1,56 @@
-# Dependencies
+# ── Dependencies ─────────────────────────────────────────────────────────────
 node_modules/
+
+# ── Claude Code local state ──────────────────────────────────────────────────
 .claude/
 
-# Environment variables
+# ── Environment & credentials ────────────────────────────────────────────────
+# Real secrets live in .env / .env.local — never commit them.
+# .env.example is the safe, committed template (placeholders only).
 .env
+.env.*
+!.env.example
 
-# Playwright
+# ── Playwright / browser / session artifacts ─────────────────────────────────
+# Session state files contain auth cookies — never commit these.
+.sessions/
+.storage/
+storageState*.json
 test-results/
 playwright-report/
 playwright/.cache/
-
-# Exports and outputs
-exports/*.json
 *.png
+*.webm
 
-# Session state files (contain auth cookies — never commit these)
-.sessions/
+# ── Runtime state (generated locally) ────────────────────────────────────────
+# Seen-state (dedup fingerprints derived from real transactions) and resume
+# checkpoints (may contain transaction data). Local runtime state only.
+.seen/
+.checkpoints/
+.data/
 
-# Logs
+# ── Financial / private generated data ───────────────────────────────────────
+# Generated transaction exports contain real financial data.
+# The directory is kept via exports/.gitkeep; its contents are ignored.
+exports/*
+!exports/.gitkeep
+
+# ── Logs & debug output ──────────────────────────────────────────────────────
+logs/
 *.log
 npm-debug.log*
 
-# OS files
+# ── Build / coverage artifacts ───────────────────────────────────────────────
+dist/
+build/
+coverage/
+.nyc_output/
+
+# ── OS files ─────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# IDE
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
