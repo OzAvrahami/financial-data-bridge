@@ -9,6 +9,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('bridge', {
   /** Safe environment/status info for the dashboard header. */
   getEnvInfo:   () => ipcRenderer.invoke('app:getEnvInfo'),
-  /** Configured source accounts WITHOUT credentials (display data only). */
-  listAccounts: () => ipcRenderer.invoke('accounts:list'),
+  /** Editable settings: { daysBack, accounts[] } — credential env-names only, no secrets. */
+  getSettings:  () => ipcRenderer.invoke('settings:get'),
+  /** Persist settings (validated + sanitized in main). Returns { ok } or { ok:false, error }. */
+  saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  /** Settings-driven mock fetch. payload: { mode:'all'|'default', daysBack }. */
+  runFetch:     (payload) => ipcRenderer.invoke('fetch:run', payload),
 });

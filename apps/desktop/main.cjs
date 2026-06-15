@@ -3,17 +3,40 @@
  *
  * Security model:
  *   - The renderer runs sandboxed with contextIsolation ON and nodeIntegration OFF.
- *   - The renderer NEVER receives secrets. Only safe, read-only display data is
- *     passed across IPC (see the credential-stripping in 'accounts:list').
- *   - .env / accounts.config.json are only ever read here, in the Node process.
+ *   - The renderer NEVER receives secrets. Settings carry credential ENV-VAR
+ *     NAMES only (usernameEnv/passwordEnv) — never resolved usernames/passwords.
+ *   - .env / accounts.config.json are only ever read/written here, in Node.
  *
- * This is a shell: the fetch actions are mocked in the renderer for now. No real
- * Playwright automation is wired up in this step.
+ * Fetch actions are still MOCKED, but now settings-driven: they resolve the real
+ * configured default/enabled accounts and validated daysBack, then simulate the
+ * run. No Playwright automation is triggered from the desktop yet.
  */
 
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
+
+// ── Lazy, memoized import of the ESM bridge-core config modules ────────────────
+const CORE_SRC = path.join(__dirname, '..', '..', 'packages', 'bridge-core', 'src');
+let _corePromise = null;
+function core() {
+  if (!_corePromise) {
+    const imp = (rel) => import(pathToFileURL(path.join(CORE_SRC, rel)).href);
+    _corePromise = Promise.all([
+      imp('config.js'),
+      imp('config/sourceAccounts.js'),
+      imp('config/appSettings.js'),
+    ]).then(([cfg, src, settings]) => ({ config: cfg.config, ...src, ...settings }));
+  }
+  return _corePromise;
+}
+
+// Resolve the accounts config file to an absolute path anchored at the repo root,
+// so it matches what the CLI uses regardless of the Electron process CWD.
+function accountsConfigPath(config) {
+  const p = config.accounts.configPath;
+  return path.isAbsolute(p) ? p : path.join(__dirname, '..', '..', p);
+}
 
 // Smoke mode: create the window hidden, confirm it loads, then quit. Used for
 // headless "does it start?" verification without leaving a GUI window open.
@@ -53,24 +76,66 @@ function createWindow() {
 ipcMain.handle('app:getEnvInfo', () => ({
   appName:  'Financial Data Bridge',
   status:   'Ready',
-  mode:     'mock — real fetch not wired yet',
+  mode:     'mock (settings-driven) — fetch is simulated',
   node:     process.versions.node,
   electron: process.versions.electron,
 }));
 
-ipcMain.handle('accounts:list', async () => {
+// Editable settings (daysBack + accounts), WITHOUT resolved secrets.
+ipcMain.handle('settings:get', async () => {
   try {
-    // Dynamic import of the ESM app module from this CommonJS file.
-    const url = pathToFileURL(path.join(__dirname, '..', '..', 'packages', 'bridge-core', 'src', 'config', 'sourceAccounts.js')).href;
-    const { loadSourceAccounts } = await import(url);
-    // CRITICAL: strip credentials. The renderer must never receive secrets.
-    return loadSourceAccounts().map(a => ({
-      provider:          a.provider,
-      providerAccountId: a.providerAccountId,
-      displayName:       a.displayName,
-    }));
+    const c = await core();
+    return c.loadAppSettings({ configPath: accountsConfigPath(c.config), config: c.config });
   } catch (err) {
     return { error: err.message };
+  }
+});
+
+// Persist settings. Validates daysBack and strips secrets before writing.
+ipcMain.handle('settings:save', async (_event, settings) => {
+  try {
+    const c = await core();
+    const saved = c.saveAppSettings(settings, { configPath: accountsConfigPath(c.config) });
+    return { ok: true, saved };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// Settings-driven MOCK fetch. Resolves the target accounts + validated daysBack
+// and reports what WOULD run. No real automation is performed.
+ipcMain.handle('fetch:run', async (_event, payload = {}) => {
+  try {
+    const c = await core();
+    const settings = c.loadAppSettings({ configPath: accountsConfigPath(c.config), config: c.config });
+
+    const dv = c.validateDaysBack(payload.daysBack ?? settings.daysBack);
+    if (!dv.valid) return { ok: false, error: `Invalid days back: ${dv.error}` };
+
+    let targets;
+    if (payload.mode === 'default') {
+      const def = c.getDefaultAccount(settings.accounts);
+      if (!def) return { ok: false, error: 'No accounts configured. Add one in Account Settings.' };
+      targets = [def];
+    } else {
+      targets = c.getEnabledAccounts(settings.accounts);
+      if (targets.length === 0) return { ok: false, error: 'No enabled accounts to fetch. Enable at least one account.' };
+    }
+
+    return {
+      ok: true,
+      mock: true,
+      mode: payload.mode === 'default' ? 'default' : 'all',
+      daysBack: dv.value,
+      accounts: targets.map(a => ({
+        provider:          a.provider,
+        providerAccountId: a.providerAccountId,
+        displayName:       a.displayName,
+        daysBack:          Number.isInteger(a.daysBack) ? a.daysBack : dv.value,
+      })),
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
   }
 });
 

@@ -56,6 +56,45 @@ body {
 .card h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
 
 .log-card { grid-column: 1 / -1; }
+.full { grid-column: 1 / -1; }
+
+.card-head { display: flex; align-items: center; justify-content: space-between; }
+.card-head h2 { margin: 0 0 12px; }
+.card-head-actions { display: flex; gap: 8px; }
+
+/* Fetch settings field */
+.field { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.field label { color: var(--muted); min-width: 80px; }
+.field input[type="number"], .field input[type="text"] {
+  background: #0b1220; color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; font-size: 14px; width: 110px;
+}
+.field-error, .err { color: #f87171; font-size: 12px; }
+input.invalid { border-color: #f87171 !important; }
+
+/* Account editor table */
+.editor-head, .editor-row {
+  display: grid;
+  grid-template-columns: 56px 80px 1.2fr 1.2fr 80px 1fr 1fr 44px 36px;
+  gap: 8px; align-items: center;
+}
+.editor-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; padding: 4px 2px; }
+.editor-row { padding: 6px 2px; border-top: 1px solid var(--border); }
+.editor-row input[type="text"], .editor-row input[type="number"], .editor-row select {
+  background: #0b1220; color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 8px; font-size: 13px; width: 100%;
+}
+.editor-row input[type="radio"], .editor-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.switch { display: flex; justify-content: center; }
+.btn-sm { padding: 6px 10px; font-size: 13px; }
+
+/* Account summary badges */
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+.badge-on  { color: var(--ok); border-color: rgba(34,197,94,0.4); }
+.badge-off { color: var(--muted); }
+code { background: #0b1220; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 
 .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 0; }
 .kv dt { color: var(--muted); }

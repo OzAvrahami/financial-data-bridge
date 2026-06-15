@@ -55,7 +55,28 @@ export function normalizeAccount(raw = {}, env = process.env) {
   const displayName       = raw.displayName ?? `${provider.toUpperCase()} (${providerAccountId})`;
   // `credentials` may hold the spec, or the spec may be inline on the raw object.
   const credentials       = resolveCredentials(raw.credentials ?? raw, env);
-  return { provider, providerAccountId, displayName, credentials };
+  // Multi-account management metadata (defaults keep older configs unchanged):
+  //   - enabled defaults to true (omit field → account runs)
+  //   - isDefault from `default`/`isDefault`
+  //   - daysBack optional per-account override (null → use global)
+  const enabled   = raw.enabled !== false;
+  const isDefault = raw.default === true || raw.isDefault === true;
+  const daysBack  = Number.isInteger(raw.daysBack) ? raw.daysBack : null;
+  return { provider, providerAccountId, displayName, enabled, isDefault, daysBack, credentials };
+}
+
+/** Filter to accounts that are enabled (missing `enabled` counts as enabled). */
+export function getEnabledAccounts(accounts = []) {
+  return accounts.filter(a => a && a.enabled !== false);
+}
+
+/**
+ * Resolve the default account: the one explicitly marked default, else the first.
+ * Returns null for an empty list.
+ */
+export function getDefaultAccount(accounts = []) {
+  if (!accounts || accounts.length === 0) return null;
+  return accounts.find(a => a && (a.isDefault === true || a.default === true)) ?? accounts[0];
 }
 
 /** Read the raw (un-normalized) account list from env or file, or null if none. */

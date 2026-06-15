@@ -1,20 +1,29 @@
-[
-  {
-    "provider": "cal",
-    "providerAccountId": "oz_cal",
-    "displayName": "Oz CAL",
-    "credentials": {
-      "usernameEnv": "OZ_CAL_USERNAME",
-      "passwordEnv": "OZ_CAL_PASSWORD"
+{
+  "daysBack": 4,
+  "accounts": [
+    {
+      "provider": "cal",
+      "providerAccountId": "oz_cal",
+      "displayName": "Oz CAL",
+      "enabled": true,
+      "default": true,
+      "daysBack": null,
+      "credentials": {
+        "usernameEnv": "OZ_CAL_USERNAME",
+        "passwordEnv": "OZ_CAL_PASSWORD"
+      }
+    },
+    {
+      "provider": "cal",
+      "providerAccountId": "wife_cal",
+      "displayName": "Wife CAL",
+      "enabled": true,
+      "default": false,
+      "daysBack": 7,
+      "credentials": {
+        "usernameEnv": "WIFE_CAL_USERNAME",
+        "passwordEnv": "WIFE_CAL_PASSWORD"
+      }
     }
-  },
-  {
-    "provider": "cal",
-    "providerAccountId": "wife_cal",
-    "displayName": "Wife CAL",
-    "credentials": {
-      "usernameEnv": "WIFE_CAL_USERNAME",
-      "passwordEnv": "WIFE_CAL_PASSWORD"
-    }
-  }
-]
+  ]
+}

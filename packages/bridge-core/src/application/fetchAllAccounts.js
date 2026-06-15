@@ -1,5 +1,5 @@
 import { fetchTransactions } from './fetchTransactions.js';
-import { loadSourceAccounts } from '../config/sourceAccounts.js';
+import { loadSourceAccounts, getEnabledAccounts } from '../config/sourceAccounts.js';
 import { logger } from '../infrastructure/logger.js';
 
 /**
@@ -37,7 +37,9 @@ import { logger } from '../infrastructure/logger.js';
  * }>}
  */
 export async function fetchAllAccounts(opts = {}, _deps = {}) {
-  const accounts = opts.accounts ?? loadSourceAccounts();
+  // Explicit accounts are used as-is (tests/programmatic). When loading from
+  // config, skip disabled accounts so "fetch all" runs only enabled ones.
+  const accounts = opts.accounts ?? getEnabledAccounts(loadSourceAccounts());
 
   // Per-account fetch options forwarded only when explicitly provided, so each
   // call keeps fetchTransactions' own defaults otherwise.

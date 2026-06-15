@@ -30,12 +30,23 @@
       </dl>
     </section>
 
-    <!-- Source accounts -->
+    <!-- Source accounts (read-only summary of saved config) -->
     <section class="card" id="accounts-card">
       <h2>Source Accounts</h2>
       <ul class="accounts" id="accounts-list">
         <li class="muted">Loading…</li>
       </ul>
+    </section>
+
+    <!-- Fetch settings -->
+    <section class="card" id="fetch-settings-card">
+      <h2>Fetch Settings</h2>
+      <div class="field">
+        <label for="days-back">Days back</label>
+        <input id="days-back" type="number" min="1" max="365" step="1" inputmode="numeric" />
+        <span class="field-error" id="days-back-error"></span>
+      </div>
+      <p class="hint">How many days of transactions to fetch (1–365). Used by both fetch actions.</p>
     </section>
 
     <!-- Actions -->
@@ -46,10 +57,27 @@
         <button id="btn-fetch-default" class="btn btn-secondary">Fetch Default Account</button>
         <button id="btn-clear-log" class="btn btn-ghost">Clear Log</button>
       </div>
-      <p class="hint">Mock actions — buttons log activity; no real fetch runs yet.</p>
+      <p class="hint">Fetch is simulated (mock) — it resolves real settings but performs no automation yet.</p>
     </section>
 
-    <!-- Last run summary placeholder -->
+    <!-- Account settings (editable) -->
+    <section class="card full" id="account-settings-card">
+      <div class="card-head">
+        <h2>Account Settings</h2>
+        <div class="card-head-actions">
+          <button id="btn-add-account" class="btn btn-ghost">+ Add Account</button>
+          <button id="btn-save-settings" class="btn btn-primary">Save Settings</button>
+        </div>
+      </div>
+      <div class="editor-head">
+        <span>Default</span><span>Provider</span><span>Account ID</span><span>Display name</span>
+        <span>Days back</span><span>Username env</span><span>Password env</span><span>On</span><span></span>
+      </div>
+      <div id="account-editor"></div>
+      <p class="hint">Credentials are referenced by <strong>environment-variable name</strong> (e.g. <code>CAL_USERNAME</code>) — never the secret itself. Leave “Days back” blank to use the global value. Click <strong>Save Settings</strong> to persist.</p>
+    </section>
+
+    <!-- Last run summary -->
     <section class="card" id="summary-card">
       <h2>Last Run Summary</h2>
       <div id="summary-body" class="muted">No runs yet.</div>

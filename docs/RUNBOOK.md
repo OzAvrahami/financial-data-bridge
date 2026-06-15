@@ -351,9 +351,9 @@ After `npm start` (API mode):
 
 ## 12. Desktop app (local UI)
 
-A minimal Electron desktop shell lives in `apps/desktop/`. It opens a window with a
-dashboard: environment/status, the configured source accounts, action buttons,
-a run log, and a last-run summary placeholder.
+An Electron desktop app lives in `apps/desktop/`. It opens a window with a
+dashboard: environment/status, a Source Accounts summary, **Fetch Settings**,
+**Account Settings** (full CRUD), action buttons, a last-run summary, and a run log.
 
 ```bash
 # 1. Install dependencies (Electron is a devDependency; only needed once)
@@ -363,24 +363,39 @@ npm install
 npm run desktop
 ```
 
-**What you'll see:** a window titled *Financial Data Bridge* showing a "Ready"
-status, your configured source accounts (display names only), and three buttons
-— **Fetch All Accounts**, **Fetch Default Account**, **Clear Log**.
+**What you can do:**
+- **Account Settings** — view / add / edit / delete accounts, enable/disable each,
+  pick one **default**, choose provider (`cal`), set account id + display name, and
+  an optional per-account **days back**. Credentials are referenced by
+  **environment-variable name** (e.g. `CAL_USERNAME`) — never the secret itself.
+  Click **Save Settings** to persist.
+- **Fetch Settings** — set the global **days back** (validated: required integer,
+  1–365).
+- **Actions** — **Fetch Default Account** uses the configured default + days back;
+  **Fetch All Accounts** runs only **enabled** accounts. Invalid days back or no
+  eligible accounts produces a clear error in the Run Log.
 
-**This step is a shell.** The fetch buttons are **mocked** — they append lines to
-the run log but do not run any real automation yet. Real fetch wiring comes in a
-later step.
+**Where settings are persisted:** the desktop reads/writes the **same private
+config file the CLI uses** — `accounts.config.json` at the repo root
+(`ACCOUNTS_CONFIG`, gitignored), in the extended object form
+`{ "daysBack": N, "accounts": [ … ] }` (see `accounts.config.example.json`).
+So accounts configured in the desktop also drive `npm run fetch:all`.
+
+**Fetch is still MOCKED but settings-driven:** the actions resolve the real
+default/enabled accounts and validated days back, then simulate the run (no
+Playwright automation runs from the desktop yet).
 
 **Security model (important):**
 - The renderer is sandboxed (`contextIsolation: true`, `nodeIntegration: false`,
-  `sandbox: true`) and talks to Node only through a tiny preload bridge
+  `sandbox: true`) and talks to Node only through the preload bridge
   (`apps/desktop/preload.cjs`).
-- Secrets never reach the UI. `.env` and `accounts.config.json` are read only in
-  the Electron **main** process (`apps/desktop/main.cjs`), and the account list is
-  **credential-stripped** before being sent to the renderer.
+- Secrets never reach the UI. `.env` / `accounts.config.json` are read & written
+  only in the Electron **main** process (`apps/desktop/main.cjs`). The settings
+  API carries credential **env-var names** only — never resolved usernames/passwords.
 
-**Files:** `apps/desktop/main.cjs` (main process + safe IPC), `apps/desktop/preload.cjs`
-(bridge), `apps/desktop/renderer/` (`index.html`, `styles.css`, `renderer.js`).
+**Files:** `apps/desktop/main.cjs` (main + IPC), `apps/desktop/preload.cjs`
+(bridge), `apps/desktop/renderer/` (`index.html`, `styles.css`, `renderer.js`),
+`packages/bridge-core/src/config/appSettings.js` (load/save/validate).
 
 ---
 
