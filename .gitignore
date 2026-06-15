@@ -10,9 +10,14 @@ node_modules/
 .env
 .env.*
 !.env.example
-# Local multi-account config (references env-var names; keep user copy private).
-# accounts.config.example.json is the safe, committed template.
+# Local multi-account config (references credential keys / env-var names — no
+# secrets). accounts.config.example.json is the safe, committed template.
 accounts.config.json
+
+# Encrypted credential stores (Electron safeStorage). These normally live in the
+# OS userData dir (outside the repo), but ignore them defensively everywhere.
+*.enc.json
+credentials.enc.json
 
 # ── Playwright / browser / session artifacts ─────────────────────────────────
 # Session state files contain auth cookies — never commit these.

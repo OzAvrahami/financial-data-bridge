@@ -366,20 +366,35 @@ npm run desktop
 **What you can do:**
 - **Account Settings** — view / add / edit / delete accounts, enable/disable each,
   pick one **default**, choose provider (`cal`), set account id + display name, and
-  an optional per-account **days back**. Credentials are referenced by
-  **environment-variable name** (e.g. `CAL_USERNAME`) — never the secret itself.
-  Click **Save Settings** to persist.
+  an optional per-account **days back**. Enter your **username and password
+  directly** and click **Save Credentials**; a status chip shows **Saved** /
+  **Not saved** (the saved password is never shown again). Click **Save Settings**
+  to persist account details.
 - **Fetch Settings** — set the global **days back** (validated: required integer,
   1–365).
 - **Actions** — **Fetch Default Account** uses the configured default + days back;
   **Fetch All Accounts** runs only **enabled** accounts. Invalid days back or no
   eligible accounts produces a clear error in the Run Log.
 
-**Where settings are persisted:** the desktop reads/writes the **same private
-config file the CLI uses** — `accounts.config.json` at the repo root
-(`ACCOUNTS_CONFIG`, gitignored), in the extended object form
+**Where account settings are persisted:** the desktop reads/writes the **same
+private config file the CLI uses** — `accounts.config.json` at the repo root
+(`ACCOUNTS_CONFIG`, gitignored), in the object form
 `{ "daysBack": N, "accounts": [ … ] }` (see `accounts.config.example.json`).
+Each account stores a `credentialKey` **reference** — never a username/password.
 So accounts configured in the desktop also drive `npm run fetch:all`.
+
+**Where credentials are stored (and how):** usernames/passwords are encrypted
+with **Electron `safeStorage`** (OS-level: Windows DPAPI, macOS Keychain, Linux
+libsecret/kwallet) and written as ciphertext to
+`<userData>/credentials.enc.json` — e.g. on Windows
+`%APPDATA%\Financial Data Bridge\credentials.enc.json`. This file lives **outside
+the repository** and is never tracked by git; it contains only base64 ciphertext.
+Saving overwrites the stored value; deleting an account prunes its stored
+credentials. **Limitation:** the file is decryptable only by the **same OS user
+on the same machine** — copy it elsewhere and credentials must be re-entered.
+
+**Developer fallback:** `.env` env-var credentials still work for the CLI. The
+desktop does not require `.env`.
 
 **Fetch is still MOCKED but settings-driven:** the actions resolve the real
 default/enabled accounts and validated days back, then simulate the run (no
@@ -389,12 +404,15 @@ Playwright automation runs from the desktop yet).
 - The renderer is sandboxed (`contextIsolation: true`, `nodeIntegration: false`,
   `sandbox: true`) and talks to Node only through the preload bridge
   (`apps/desktop/preload.cjs`).
-- Secrets never reach the UI. `.env` / `accounts.config.json` are read & written
-  only in the Electron **main** process (`apps/desktop/main.cjs`). The settings
-  API carries credential **env-var names** only — never resolved usernames/passwords.
+- Credentials are handled **only in the Electron main process**. The renderer
+  sends username/password once to be encrypted, and never receives a saved
+  password back — only a saved/not-saved **status**.
+- `accounts.config.json` stores only a `credentialKey` (+ optional `*_env` dev
+  refs) — never secret values.
 
-**Files:** `apps/desktop/main.cjs` (main + IPC), `apps/desktop/preload.cjs`
-(bridge), `apps/desktop/renderer/` (`index.html`, `styles.css`, `renderer.js`),
+**Files:** `apps/desktop/main.cjs` (main + IPC + app name), `apps/desktop/preload.cjs`
+(bridge), `apps/desktop/credentialStore.cjs` (safeStorage credential store),
+`apps/desktop/renderer/` (`index.html`, `styles.css`, `renderer.js`),
 `packages/bridge-core/src/config/appSettings.js` (load/save/validate).
 
 ---

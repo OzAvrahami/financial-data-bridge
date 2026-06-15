@@ -79,6 +79,26 @@ describe('saveAppSettings / loadAppSettings round-trip', () => {
     assert.throws(() => saveAppSettings({ daysBack: 0, accounts: [] }, { configPath: cfgPath }));
   });
 
+  it('persists credentialKey but never the secret values', () => {
+    saveAppSettings({
+      daysBack: 4,
+      accounts: [{
+        provider: 'cal', providerAccountId: 'cal_5304', displayName: 'CAL 5304',
+        credentialKey: 'cred-uuid-123',
+        username: 'LEAK_USER', password: 'LEAK_PASS', // must be dropped
+      }],
+    }, { configPath: cfgPath });
+
+    const rawText = readFileSync(cfgPath, 'utf-8');
+    assert.match(rawText, /cred-uuid-123/, 'credentialKey (a reference, not a secret) is stored');
+    assert.doesNotMatch(rawText, /LEAK_USER|LEAK_PASS/, 'raw credentials must never be written');
+
+    const loaded = loadAppSettings({ configPath: cfgPath, config: TEST_CONFIG });
+    assert.equal(loaded.accounts[0].credentialKey, 'cred-uuid-123');
+    assert.equal('username' in loaded.accounts[0], false);
+    assert.equal('password' in loaded.accounts[0], false);
+  });
+
   it('NEVER persists raw credentials — only env-var names', () => {
     saveAppSettings({
       daysBack: 4,

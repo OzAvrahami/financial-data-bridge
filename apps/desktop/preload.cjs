@@ -15,4 +15,12 @@ contextBridge.exposeInMainWorld('bridge', {
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   /** Settings-driven mock fetch. payload: { mode:'all'|'default', daysBack }. */
   runFetch:     (payload) => ipcRenderer.invoke('fetch:run', payload),
+
+  // ── Secure credentials (OS keychain via safeStorage; main-process only) ──────
+  /** Credential status for a key: { saved, available } — never the secret. */
+  getCredentialStatus: (credentialKey) => ipcRenderer.invoke('credentials:status', credentialKey),
+  /** Encrypt + store credentials. Returns { ok } only — never echoes the password. */
+  saveCredentials:     (credentialKey, creds) => ipcRenderer.invoke('credentials:set', credentialKey, creds),
+  /** Delete stored credentials for a key. */
+  deleteCredentials:   (credentialKey) => ipcRenderer.invoke('credentials:delete', credentialKey),
 });

@@ -57,7 +57,11 @@ function sanitizeAccountForStorage(a = {}) {
   };
   if (Number.isInteger(a.daysBack)) out.daysBack = a.daysBack;
 
-  // Credential ENV-VAR NAMES only. Raw username/password are intentionally dropped.
+  // Reference to OS-secure-stored credentials (desktop). NOT a secret — just a key.
+  if (a.credentialKey) out.credentialKey = String(a.credentialKey).trim();
+
+  // Credential ENV-VAR NAMES only (developer .env fallback). Raw username/password
+  // are intentionally dropped and NEVER written to this file.
   const usernameEnv = a.credentials?.usernameEnv ?? a.usernameEnv;
   const passwordEnv = a.credentials?.passwordEnv ?? a.passwordEnv;
   if (usernameEnv || passwordEnv) {

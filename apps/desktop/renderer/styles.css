@@ -73,22 +73,31 @@ body {
 .field-error, .err { color: #f87171; font-size: 12px; }
 input.invalid { border-color: #f87171 !important; }
 
-/* Account editor table */
-.editor-head, .editor-row {
-  display: grid;
-  grid-template-columns: 56px 80px 1.2fr 1.2fr 80px 1fr 1fr 44px 36px;
-  gap: 8px; align-items: center;
+/* Account editor cards */
+.acct-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
 }
-.editor-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; padding: 4px 2px; }
-.editor-row { padding: 6px 2px; border-top: 1px solid var(--border); }
-.editor-row input[type="text"], .editor-row input[type="number"], .editor-row select {
+.acct-card-head { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
+.acct-card-head .spacer { flex: 1; }
+.inline { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.inline input { width: 15px; height: 15px; cursor: pointer; }
+
+.acct-fields, .acct-cred { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.acct-cred { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+
+.fld { display: flex; flex-direction: column; gap: 4px; }
+.fld-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+.fld input, .fld select {
   background: #0b1220; color: var(--text);
   border: 1px solid var(--border); border-radius: 6px;
-  padding: 6px 8px; font-size: 13px; width: 100%;
+  padding: 7px 9px; font-size: 13px; min-width: 150px;
 }
-.editor-row input[type="radio"], .editor-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
-.switch { display: flex; justify-content: center; }
-.btn-sm { padding: 6px 10px; font-size: 13px; }
+.fld input[type="number"] { min-width: 90px; width: 90px; }
+.btn-sm { padding: 7px 12px; font-size: 13px; }
 
 /* Account summary badges */
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
