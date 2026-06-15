@@ -1,83 +1,70 @@
 # Financial Data Bridge
 
-Automated financial-data tooling: logs into provider websites (CAL today; designed
-for more), fetches and normalizes transactions, deduplicates them, writes JSON
-exports, and can push them to a finance system. Runs as a CLI, an HTTP API, or a
-local Desktop app.
+A **desktop application** that logs into your financial provider (CAL today;
+multi-provider by design), fetches and deduplicates transactions, and can export
+them. Built with **Electron** on top of a reusable **bridge-core** engine.
+
+The desktop app is the primary, user-facing entry point — non-technical users do
+not need to edit files or run terminal commands.
+
+## Run the desktop app
+
+```bash
+npm install      # once (Electron is a devDependency)
+npm run desktop
+```
+
+A window opens with: **Environment**, **Source Accounts**, **Fetch Settings**
+(days back), **Account Settings** (add/edit/delete accounts, enter username &
+password directly), **Actions**, a **Last Run Summary**, and a **Run Log**.
+
+> Fetch is currently **simulated (mock)** but settings-driven — it resolves your
+> real configured accounts and validated days-back and reports what would run.
+> Real provider automation is wired in a later step.
+
+## Where things are stored
+
+| What | Where | Notes |
+|------|-------|-------|
+| Account settings (metadata, days back) | `accounts.config.json` (repo root) | Gitignored. Stores only a `credentialKey` reference — never passwords. |
+| Credentials (username/password) | `<userData>/credentials.enc.json` | Outside the repo. Encrypted via **Electron `safeStorage`** (Windows DPAPI / macOS Keychain / Linux libsecret). |
+| Runtime state (sessions, dedup "seen", checkpoints, exports) | `runtime/` | Gitignored local state. |
+
+**Credential security:** passwords are entered in the UI, sent once to the
+Electron main process, and stored **encrypted by the OS**. The renderer never
+receives a saved password back — only a “Saved / Not saved” status. The encrypted
+file is decryptable only by the same OS user on the same machine.
 
 ## Repository layout
 
 ```
-financial-data-bridge/
-├─ apps/
-│  ├─ cli/                # CLI entrypoint (npm run fetch / fetch:all)
-│  │  └─ index.js
-│  └─ desktop/            # Electron desktop app (npm run desktop)
-│     ├─ main.cjs
-│     ├─ preload.cjs
-│     └─ renderer/        # index.html, styles.css, renderer.js
-├─ packages/
-│  └─ bridge-core/        # All reusable business logic
-│     └─ src/
-│        ├─ api/          # Express server (npm start)
-│        ├─ application/  # use cases: fetchTransactions, fetchAllAccounts, export
-│        ├─ config/       # source-account configuration
-│        ├─ core/         # browser manager, provider registry, base provider
-│        ├─ infrastructure/  # dedup, stores, retry, metrics, logger, migration
-│        ├─ providers/    # provider implementations (cal/)
-│        ├─ schema/       # transaction + run-report models
-│        ├─ config.js
-│        └─ exporter.js
-├─ scripts/               # standalone scripts (exportToFinance.js)
-├─ tests/                 # unit / integration / helpers / fixtures
-├─ docs/                  # RUNBOOK.md, RAILWAY.md
-├─ runtime/               # local state (gitignored): seen/ sessions/ checkpoints/ exports/
-├─ accounts.config.example.json
-├─ Dockerfile
-├─ .env.example
-└─ package.json
+apps/
+  desktop/         # Electron app (main.cjs, preload.cjs, renderer/, credentialStore.cjs)
+  cli/             # developer CLI fallback (apps/cli/index.js)
+packages/
+  bridge-core/src/ # engine: application/, providers/, config/, infrastructure/, schema/, …
+tests/             # unit + integration
+runtime/           # local state (gitignored)
+docs/RUNBOOK.md    # developer/operations notes
+accounts.config.example.json
+.env.example       # developer-only fallback config
 ```
 
-## Setup
+## Developer commands
 
-```bash
-npm install
-cp .env.example .env   # then fill in CAL_USERNAME / CAL_PASSWORD
-```
-
-See **[docs/RUNBOOK.md](docs/RUNBOOK.md)** for the full operations guide and
-**[docs/RAILWAY.md](docs/RAILWAY.md)** for deployment.
-
-## Commands
-
-| Command | What it does |
-|---------|--------------|
-| `npm run fetch` | Fetch the default account (one-shot CLI). |
-| `npm run fetch:all` | Fetch every configured source account sequentially. |
-| `npm run desktop` | Open the local Electron desktop dashboard. |
-| `npm start` | Start the HTTP API server. |
-| `npm run export:finance -- --file runtime/exports/<file>.json` | Preview a finance export (dry-run). Add `--execute` to send. |
+| Command | Purpose |
+|---------|---------|
+| `npm run desktop` | **Run the app. This is the normal command.** |
 | `npm test` | Run the full test suite. |
+| `npm run test:unit` / `npm run test:integration` | Run a subset. |
 
-## Multi-account configuration
+There are also two **advanced developer-only** CLI commands
+(`dev:fetch` / `dev:fetch:all`) that run real provider automation from the
+terminal. They are **not** part of normal use, require maintainer-managed env
+configuration, and are documented in
+**[docs/RUNBOOK.md → Advanced developer fallback](docs/RUNBOOK.md)**.
 
-Define multiple source accounts (per provider) via `SOURCE_ACCOUNTS` (inline JSON)
-or an `accounts.config.json` file (copy `accounts.config.example.json`). Credentials
-are referenced by env-var name, never inlined. With no config, the single default
-CAL account is used. See docs/RUNBOOK.md.
-
-## Runtime state
-
-Local state (dedup "seen" state, sessions, checkpoints, exports) lives under
-`runtime/` and is gitignored. Legacy root folders (`.seen/`, `.sessions/`,
-`.checkpoints/`, `exports/`) are migrated automatically and non-destructively on
-first run — see docs/RUNBOOK.md §7.1.
-
-## Security
-
-- `.env` and `accounts.config.json` are never committed and never read in the
-  desktop renderer (only in the Node/main process).
-- The desktop renderer is sandboxed (contextIsolation on, nodeIntegration off).
+See **[docs/RUNBOOK.md](docs/RUNBOOK.md)** for deeper developer/ops notes.
 
 ## License
 

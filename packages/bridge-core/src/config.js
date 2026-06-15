@@ -59,13 +59,6 @@ export const config = {
     configPath: env('ACCOUNTS_CONFIG', 'accounts.config.json'),
   },
 
-  api: {
-    port: parseInt(env('API_PORT', '3000'), 10),
-    // If set, the API requires an X-API-Key header matching this value.
-    // Leave empty (default) for open localhost access.
-    key: env('API_KEY', ''),
-  },
-
   log: {
     level: env('LOG_LEVEL', 'info'),
   },

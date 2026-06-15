@@ -1,10 +1,9 @@
 /**
  * Unit tests for the reusable runFinanceExport() application function.
  *
- * These exercise the function directly (in-process) — the complement to the
- * spawn-based CLI tests in tests/unit/scripts/exportToFinance.test.js. No real
- * HTTP calls are made: only dry-run and pre-send validation paths are tested,
- * all of which return/throw before any network access.
+ * These exercise the function directly (in-process). No real HTTP calls are made:
+ * only dry-run and pre-send validation paths are tested, all of which return/throw
+ * before any network access.
  */
 
 import { describe, it, before, after } from 'node:test';

@@ -1,22 +1,21 @@
 {
-  "name": "financial-data-provider",
+  "name": "financial-data-bridge",
   "version": "3.0.0",
-  "description": "Automated financial data provider service — fetches transactions from credit card and bank websites. Supports CAL; designed for multi-provider extension.",
-  "main": "apps/cli/index.js",
+  "description": "Desktop app that fetches, deduplicates, and exports credit-card/bank transactions (CAL today; multi-provider by design). Electron UI on top of the bridge-core engine.",
+  "main": "apps/desktop/main.cjs",
   "type": "module",
   "scripts": {
-    "start": "node packages/bridge-core/src/api/index.js",
-    "fetch": "node apps/cli/index.js",
-    "fetch:all": "node apps/cli/index.js --all-accounts",
     "desktop": "electron apps/desktop/main.cjs",
-    "export:finance": "node scripts/exportToFinance.js",
     "test": "node tests/runner.js tests",
     "test:unit": "node tests/runner.js tests/unit",
-    "test:integration": "node tests/runner.js tests/integration"
+    "test:integration": "node tests/runner.js tests/integration",
+    "dev:fetch": "node apps/cli/index.js",
+    "dev:fetch:all": "node apps/cli/index.js --all-accounts"
   },
   "keywords": [
+    "electron",
+    "desktop",
     "playwright",
-    "automation",
     "finance",
     "credit-card",
     "transactions",
@@ -26,8 +25,7 @@
   "license": "MIT",
   "dependencies": {
     "@playwright/test": "^1.56.1",
-    "dotenv": "^16.4.5",
-    "express": "^4.22.1"
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "electron": "^33.4.11"
