@@ -23,6 +23,7 @@ export function createFakeProvider(opts = {}) {
   let _loginCallCount = 0;
   let _fetchCallCount = 0;
   let _cleanupCalled  = false;
+  let _lastDaysBack;
 
   return {
     name: opts.name ?? 'FAKE',
@@ -45,6 +46,7 @@ export function createFakeProvider(opts = {}) {
 
     async fetchTransactions({ daysBack, startIndex = 0, onProgress } = {}) {
       _fetchCallCount++;
+      _lastDaysBack = daysBack;
 
       let result;
       if (typeof opts.fetch === 'function') {
@@ -85,5 +87,6 @@ export function createFakeProvider(opts = {}) {
     get loginCallCount() { return _loginCallCount; },
     get fetchCallCount()  { return _fetchCallCount; },
     get cleanupCalled()   { return _cleanupCalled; },
+    get lastDaysBack()    { return _lastDaysBack; },
   };
 }

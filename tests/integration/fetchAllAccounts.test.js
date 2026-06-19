@@ -167,6 +167,87 @@ describe('fetchAllAccounts — failure isolation & backward compatibility', () =
   });
 });
 
+describe('fetchAllAccounts — daysBack resolution', () => {
+  it('uses a per-account daysBack when set, else the global daysBack', async () => {
+    const providers = {};
+    const deps = (account) => {
+      const provider = createFakeProvider({ fetchResult: { transactions: [], warnings: [] } });
+      providers[account.providerAccountId] = provider;
+      return {
+        provider,
+        browser:         new FakeBrowserManager(),
+        sessionStore:    new FakeSessionStore(),
+        checkpointStore: new FakeCheckpointStore(),
+        seenStore:       new FakeSeenStore(),
+        retryDelay:      0,
+      };
+    };
+    const accounts = [
+      { provider: 'cal', providerAccountId: 'override', displayName: 'Override', daysBack: 30, credentials: { username: 'u', password: 'p' } },
+      { provider: 'cal', providerAccountId: 'global',   displayName: 'Global',                 credentials: { username: 'u', password: 'p' } },
+    ];
+
+    await fetchAllAccounts({ accounts, daysBack: 7, skipExport: true }, deps);
+
+    assert.equal(providers.override.lastDaysBack, 30, 'per-account override wins');
+    assert.equal(providers.global.lastDaysBack, 7,   'falls back to the global daysBack');
+  });
+});
+
+describe('fetchAllAccounts — progress events', () => {
+  it('emits account-start and account-done with secret-free summaries', async () => {
+    const events = [];
+    await fetchAllAccounts(
+      { accounts: TWO_CAL_ACCOUNTS, daysBack: 5, skipExport: true, onEvent: (e) => events.push(e) },
+      depsFactory()
+    );
+
+    const starts = events.filter(e => e.type === 'account-start');
+    const dones  = events.filter(e => e.type === 'account-done');
+    assert.equal(starts.length, 2);
+    assert.equal(dones.length, 2);
+    assert.equal(dones[0].summary.created, sampleTransactions.length);
+
+    // No credential material anywhere in the event stream.
+    const blob = JSON.stringify(events);
+    assert.doesNotMatch(blob, /password/i);
+    assert.doesNotMatch(blob, /"p1"|"p2"/);
+  });
+
+  it('emits account-error (not account-done) for a failing account', async () => {
+    const events = [];
+    await fetchAllAccounts(
+      { accounts: TWO_CAL_ACCOUNTS, skipExport: true, onEvent: (e) => events.push(e) },
+      depsFactory({ fail: { oz_cal: true } })
+    );
+
+    assert.ok(events.some(e => e.type === 'account-error' && e.providerAccountId === 'oz_cal'));
+    assert.ok(events.some(e => e.type === 'account-done'  && e.providerAccountId === 'wife_cal'));
+    assert.ok(!events.some(e => e.type === 'account-done' && e.providerAccountId === 'oz_cal'));
+  });
+});
+
+describe('fetchAllAccounts — missing credentials', () => {
+  it('fails only the account without credentials and continues with the rest', async () => {
+    const accounts = [
+      { provider: 'cal', providerAccountId: 'nocreds', displayName: 'No Creds', credentials: { username: '', password: '' } },
+      { provider: 'cal', providerAccountId: 'ok',      displayName: 'OK',       credentials: { username: 'u', password: 'p' } },
+    ];
+    const combined = await fetchAllAccounts({ accounts, skipExport: true }, depsFactory());
+
+    const bad = combined.accounts.find(a => a.providerAccountId === 'nocreds');
+    const ok  = combined.accounts.find(a => a.providerAccountId === 'ok');
+
+    assert.equal(bad.status, 'failed');
+    assert.match(bad.error, /Missing credentials/);
+    assert.ok(!/\.env/i.test(bad.error), 'error must not reference .env');
+    assert.match(bad.error, /No Creds/); // account-specific
+    assert.equal(ok.status, 'success');
+    assert.equal(combined.summary.failed, 1);
+    assert.equal(combined.summary.succeeded, 1);
+  });
+});
+
 // Sanity: the single-account fetchTransactions still stamps providerAccountId.
 describe('fetchTransactions — single-account metadata stamping', () => {
   it('stamps providerAccountId from the accountId alias', async () => {

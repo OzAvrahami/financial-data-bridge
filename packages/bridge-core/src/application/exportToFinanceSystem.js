@@ -1,7 +1,6 @@
-import dotenv from 'dotenv';
 import { parseAmount } from '../providers/cal/normalizer.js';
-
-dotenv.config();
+import { logger } from '../infrastructure/logger.js';
+import { redactSecrets, truncate } from '../infrastructure/redact.js';
 
 /**
  * Resolve the original-currency amount for the payload, guarding against 0.
@@ -36,17 +35,27 @@ export function shouldSendTransaction(transaction) {
     return true;
 }
 
-export async function exportToFinanceSystem(transactions) {
+/**
+ * Send qualifying transactions to the finance system.
+ *
+ * Credentials come from `financeConfig` (the desktop passes the UI-configured,
+ * in-memory values). `process.env` is only a fallback for tests/CLI-less callers.
+ *
+ * @param {object[]} transactions
+ * @param {{ apiUrl?: string, apiKey?: string }} [financeConfig]
+ */
+export async function exportToFinanceSystem(transactions, financeConfig = {}) {
     if (!Array.isArray(transactions)) {
         throw new Error("Expected transactions to be an array");
     }
 
-    const apiUrl = process.env.FINANCE_API_URL;
-    const apiKey = process.env.FINANCE_API_KEY;
+    const apiUrl = financeConfig.apiUrl ?? process.env.FINANCE_API_URL;
+    const apiKey = financeConfig.apiKey ?? process.env.FINANCE_API_KEY;
 
-    if (!apiUrl) throw new Error("Missing FINANCE_API_URL");
-    if (!apiKey) throw new Error("Missing FINANCE_API_KEY");
+    if (!apiUrl) throw new Error("Missing finance API URL");
+    if (!apiKey) throw new Error("Missing finance API key");
 
+    let sent = 0;
     for (const transaction of transactions) {
         if (!shouldSendTransaction(transaction)) {
             continue;
@@ -80,24 +89,36 @@ export async function exportToFinanceSystem(transactions) {
             external_id: transaction.dedupKey,
         };
 
-        console.log("Sending payload:", JSON.stringify(payload, null, 2));
-
-        const response = await fetch(apiUrl, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
+        // NB: never log the payload (financial data) or the auth header (secret).
+        let response;
+        try {
+            response = await fetch(apiUrl, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${apiKey}`,
+                },
+                body: JSON.stringify(payload),
+            });
+        } catch (err) {
+            // Network/TLS/DNS failure — strip any secret or secret-bearing URL.
             throw new Error(
-                `Failed to export transaction "${transaction.merchantName}": ${response.status} ${errorText}`
+                `Finance request failed: ${redactSecrets(err.message, [apiKey, apiUrl])}`
             );
         }
 
-        console.log("Exported transaction:", transaction.merchantName);
+        if (!response.ok) {
+            // The response body may echo sensitive data — redact + truncate it.
+            const bodyText = await response.text().catch(() => "");
+            const safeBody = bodyText ? ` — ${truncate(redactSecrets(bodyText, [apiKey]), 200)}` : "";
+            throw new Error(
+                `Failed to export "${transaction.merchantName}": HTTP ${response.status}${safeBody}`
+            );
+        }
+
+        sent++;
     }
+
+    logger.info(`Finance export sent ${sent} transaction(s)`);
+    return { sent };
 }

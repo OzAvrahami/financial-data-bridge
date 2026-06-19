@@ -57,7 +57,7 @@
         <button id="btn-fetch-default" class="btn btn-secondary">Fetch Default Account</button>
         <button id="btn-clear-log" class="btn btn-ghost">Clear Log</button>
       </div>
-      <p class="hint">Fetch is simulated (mock) — it resolves real settings but performs no automation yet.</p>
+      <p class="hint">Fetches real transactions from the provider (CAL) using your saved credentials. Runs accounts sequentially; only one run at a time. Watch the Run Log for progress.</p>
     </section>
 
     <!-- Account settings (editable) -->
@@ -71,6 +71,34 @@
       </div>
       <div id="account-editor"></div>
       <p class="hint">Enter your <strong>username and password</strong> directly — they are stored encrypted by your operating system, never in the config file or git. Leave “Days back” blank to use the global value. Click <strong>Save Settings</strong> to persist account details.</p>
+    </section>
+
+    <!-- Financial System Integration -->
+    <section class="card full" id="finance-card">
+      <div class="card-head">
+        <h2>Financial System Integration</h2>
+        <label class="inline">
+          <input type="checkbox" id="finance-enabled" /> Enable finance export
+        </label>
+      </div>
+      <div class="acct-fields">
+        <label class="fld">
+          <span class="fld-label">API URL / endpoint</span>
+          <input id="finance-url" type="text" placeholder="https://your-finance-system/api/transactions" />
+        </label>
+        <label class="fld">
+          <span class="fld-label">API key / token</span>
+          <input id="finance-key" type="password" placeholder="paste key to save / replace" />
+        </label>
+      </div>
+      <div class="acct-cred">
+        <button id="btn-finance-save" class="btn btn-secondary btn-sm">Save Key</button>
+        <button id="btn-finance-delete" class="btn btn-ghost btn-sm">Delete Key</button>
+        <button id="btn-finance-test" class="btn btn-ghost btn-sm">Test Connection</button>
+        <span id="finance-status" class="badge">checking…</span>
+      </div>
+      <p class="hint" id="finance-test-result"></p>
+      <p class="hint">The API key is encrypted by your operating system (never stored in settings, logs, or exports). The URL is saved with your settings. Enter the key and click <strong>Save Key</strong>, then <strong>Test Connection</strong>. When enabled, exporting runs automatically after each fetch.</p>
     </section>
 
     <!-- Last run summary -->

@@ -68,6 +68,32 @@ function createCredentialStore({ encrypt, decrypt, filePath, isAvailable }) {
       return true;
     },
 
+    /**
+     * Encrypt + store a single opaque secret (e.g. an API key/token) under `key`.
+     * Same encryption boundary as setCredentials; refuses plaintext fallback.
+     */
+    setSecret(key, secret = '') {
+      if (!key) throw new Error('credentialKey is required');
+      if (isAvailable && !isAvailable()) {
+        throw new Error('OS secure storage is not available; refusing to store secrets in plaintext');
+      }
+      const data = load();
+      data.entries[key] = encrypt(JSON.stringify({ secret: String(secret) }));
+      persist(data);
+      return true;
+    },
+
+    /** Decrypt + return the stored secret string for `key`, or null. MAIN-process use only. */
+    getSecret(key) {
+      const data = load();
+      const blob = key && data.entries[key];
+      if (!blob) return null;
+      try {
+        const obj = JSON.parse(decrypt(blob));
+        return typeof obj.secret === 'string' ? obj.secret : null;
+      } catch { return null; }
+    },
+
     /** Whether credentials are stored for `key`. Returns no secret. */
     getStatus(key) {
       const data = load();

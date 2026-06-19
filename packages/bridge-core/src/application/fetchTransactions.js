@@ -68,11 +68,22 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
   const report = createRunReport({ provider: providerName, accountId, providerAccountId, displayName });
 
+  // Structured, secret-free progress events for the UI / telemetry. Carries only
+  // provider/account identifiers and counts — never credentials or page content.
+  // A faulty listener must never break a fetch.
+  const emit = (event) => {
+    if (typeof opts.onEvent !== 'function') return;
+    try { opts.onEvent({ provider: providerName, providerAccountId, displayName, ...event }); }
+    catch { /* listener errors are swallowed on purpose */ }
+  };
+
   // ── Validation ────────────────────────────────────────────────────────────
   if (!credentials?.username || !credentials?.password) {
+    // Account-specific message (no .env reference — the desktop injects
+    // credentials from the OS-encrypted store, not the environment).
     const err = new Error(
-      `Missing credentials for provider "${providerName}". ` +
-      `Set ${providerName.toUpperCase()}_USERNAME and ${providerName.toUpperCase()}_PASSWORD in .env`
+      `Missing credentials for ${displayName || providerAccountId} (${providerName}). ` +
+      `Add a username and password for this account.`
     );
     finalizeReport(report, { status: 'failed', error: err });
     metrics.recordRun(report);
@@ -152,6 +163,8 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
       const newState = await browser.getStorageState();
       await sessionStore.save(providerName, accountId, newState);
     }
+
+    emit({ type: 'login', sessionReused: report.sessionReused === true });
 
     // ── Build onProgress callback ─────────────────────────────────────────
     // Called by the provider after each extracted transaction. Handles:
@@ -278,6 +291,13 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     report.totalTransactionsConsidered = allTransactions.length;
     report.warnings.push(...priorWarnings, ...providerWarnings);
 
+    emit({
+      type: 'fetched',
+      transactionsFetched: report.transactionsFetched,
+      pendingSkipped:      report.pendingSkippedCount,
+      skipped:             report.transactionsSkipped,
+    });
+
     logger.info(`Fetched ${fetchedTransactions.length} transaction(s) in this run segment`, {
       provider: providerName,
       account:  accountId,
@@ -330,6 +350,14 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     report.duplicatesSkipped       = withinRunDupCount;
     report.newTransactionsExported = createdCount + updatedCount;
 
+    emit({
+      type:       'dedup',
+      created:    createdCount,
+      updated:    updatedCount,
+      unchanged:  unchangedCount,
+      duplicates: withinRunDupCount,
+    });
+
     if (unchangedCount > 0) {
       logger.info(`${unchangedCount} unchanged transaction(s) excluded from export`, { provider: providerName });
     }
@@ -356,6 +384,8 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     } else if (!skipExport && exportedTxs.length === 0) {
       logger.info('No new or updated transactions to export', { provider: providerName });
     }
+
+    emit({ type: 'export', exported: exportedTxs.length, filePath });
 
     // ── Update seen store ─────────────────────────────────────────────────
     if (!fullFetch) {

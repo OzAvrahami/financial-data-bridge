@@ -32,16 +32,24 @@ not require a `.env` file and stores credentials securely via the OS (see §4).
 
 | Item | Location | Notes |
 |------|----------|-------|
-| Account metadata (provider, id, display name, enabled, default, days back) | `accounts.config.json` (repo root, gitignored) | Object form `{ daysBack, accounts:[…] }`. Stores a `credentialKey` reference — never secrets. See `accounts.config.example.json`. |
-| Credentials (username/password) | `<userData>/credentials.enc.json` (e.g. `%APPDATA%\Financial Data Bridge\` on Windows) | Encrypted via Electron `safeStorage` (DPAPI/Keychain/libsecret). Outside the repo. **This is how all credentials are stored.** |
+| App settings (days back, accounts, finance `{enabled, apiUrl, credentialKey}`) | `<userData>/settings.json` (e.g. `%APPDATA%\Financial Data Bridge\` on Windows) | Object form `{ daysBack, accounts:[…], finance:{…} }`. Stores `credentialKey` references — never secrets. Migrated automatically from a legacy repo-root `accounts.config.json` on first run (the legacy file is copied, never deleted). |
+| Credentials (CAL username/password) | `<userData>/credentials.enc.json` | Encrypted via Electron `safeStorage` (DPAPI/Keychain/libsecret). Outside the repo. |
+| Finance API key/token | `<userData>/credentials.enc.json` (under the finance `credentialKey`) | Encrypted via Electron `safeStorage`. Never written to settings, logs, exports, or errors. |
 
-**Credential model:** the user enters username/password in **Account Settings →
-Save Credentials**. The renderer sends them once to the main process, which
-encrypts and stores them under the account's `credentialKey`. The renderer only
-ever sees a **Saved / Not saved** status — never the saved password. Saving
-overwrites; deleting an account prunes its stored credentials.
+**Credential model:** the user enters CAL username/password in **Account Settings
+→ Save Credentials**, and the finance API key in **Financial System Integration →
+Save Key**. The renderer sends each secret once to the main process, which encrypts
+and stores it under its `credentialKey`. The renderer only ever sees a **Saved /
+Not saved** status — never the saved secret. Saving overwrites; deleting prunes.
 **Limitation:** the encrypted file is decryptable only by the same OS user on the
-same machine; moved elsewhere, credentials must be re-entered.
+same machine; moved elsewhere, secrets must be re-entered.
+
+**Financial System Integration:** enable/disable finance export, set the API
+URL/endpoint, save/replace/delete the API key, and run **Test Connection** — all
+from the desktop UI. When enabled, finance export runs automatically after each
+fetch, sending qualifying transactions in memory (the key never touches disk in
+plaintext). When disabled, fetching CAL transactions works without contacting the
+finance API. Configuration comes entirely from the UI — **not** from `.env`.
 
 ## 5. Runtime state (`runtime/`)
 

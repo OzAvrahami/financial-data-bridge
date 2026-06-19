@@ -146,6 +146,56 @@ describe('saveAppSettings / loadAppSettings round-trip', () => {
   });
 });
 
+describe('finance integration settings', () => {
+  it('round-trips the finance block (enabled, apiUrl, credentialKey)', () => {
+    saveAppSettings({
+      daysBack: 4,
+      accounts: [{ provider: 'cal', providerAccountId: 'a', displayName: 'A', default: true }],
+      finance: { enabled: true, apiUrl: 'https://fin.example/api', credentialKey: 'finance-default' },
+    }, { configPath: cfgPath });
+
+    const loaded = loadAppSettings({ configPath: cfgPath, config: TEST_CONFIG });
+    assert.equal(loaded.finance.enabled, true);
+    assert.equal(loaded.finance.apiUrl, 'https://fin.example/api');
+    assert.equal(loaded.finance.credentialKey, 'finance-default');
+  });
+
+  it('never persists an API key/secret — only the credentialKey reference', () => {
+    saveAppSettings({
+      daysBack: 4,
+      accounts: [{ provider: 'cal', providerAccountId: 'a', displayName: 'A', default: true }],
+      finance: {
+        enabled: true,
+        apiUrl: 'https://fin.example/api',
+        credentialKey: 'finance-default',
+        // Attempts to sneak a secret in — must be dropped.
+        apiKey: 'LEAK_FINANCE_KEY',
+        secret: 'ALSO_LEAK',
+      },
+    }, { configPath: cfgPath });
+
+    const rawText = readFileSync(cfgPath, 'utf-8');
+    assert.doesNotMatch(rawText, /LEAK_FINANCE_KEY|ALSO_LEAK/, 'finance secret must never be written');
+    assert.match(rawText, /finance-default/);
+
+    const loaded = loadAppSettings({ configPath: cfgPath, config: TEST_CONFIG });
+    assert.equal('apiKey' in loaded.finance, false);
+    assert.equal('secret' in loaded.finance, false);
+  });
+
+  it('defaults to a disabled, unconfigured finance block when absent', () => {
+    saveAppSettings({
+      daysBack: 4,
+      accounts: [{ provider: 'cal', providerAccountId: 'a', displayName: 'A', default: true }],
+    }, { configPath: cfgPath });
+
+    const loaded = loadAppSettings({ configPath: cfgPath, config: TEST_CONFIG });
+    assert.equal(loaded.finance.enabled, false);
+    assert.equal(loaded.finance.apiUrl, '');
+    assert.equal(loaded.finance.credentialKey, 'finance-default');
+  });
+});
+
 describe('getEnabledAccounts / getDefaultAccount', () => {
   const accounts = [
     { providerAccountId: 'a', enabled: false, default: false },

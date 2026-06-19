@@ -88,4 +88,36 @@ describe('credentialStore', () => {
     const store = makeStore();
     assert.equal(store.getCredentials('does-not-exist'), null);
   });
+
+  // ── Opaque secret API (finance API key / token) ──────────────────────────────
+  it('round-trips an opaque secret and reports status', () => {
+    const store = makeStore();
+    assert.equal(store.getStatus('fin').saved, false);
+    store.setSecret('fin', 'sk_live_TOKEN_123');
+    assert.equal(store.getStatus('fin').saved, true);
+    assert.equal(store.getSecret('fin'), 'sk_live_TOKEN_123');
+  });
+
+  it('writes the secret as ciphertext only — no plaintext token on disk', () => {
+    const store = makeStore();
+    store.setSecret('fin', 'sk_live_TOKEN_123');
+    const raw = readFileSync(lastFile, 'utf-8');
+    assert.doesNotMatch(raw, /sk_live_TOKEN_123/, 'plaintext token must not be in the file');
+  });
+
+  it('getSecret returns null for unknown keys', () => {
+    assert.equal(makeStore().getSecret('nope'), null);
+  });
+
+  it('refuses to store a secret when OS encryption is unavailable', () => {
+    const store = makeStore(() => false);
+    assert.throws(() => store.setSecret('fin', 'x'), /not available/);
+  });
+
+  it('deletes/prunes a secret like any other key', () => {
+    const store = makeStore();
+    store.setSecret('fin', 'tok');
+    assert.equal(store.deleteCredentials('fin'), true);
+    assert.equal(store.getStatus('fin').saved, false);
+  });
 });

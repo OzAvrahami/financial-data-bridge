@@ -25,6 +25,7 @@ export {
   runFinanceExport,
   planFinanceExport,
   loadTransactionFile,
+  testFinanceConnection,
   FinanceExportInputError,
 } from './runFinanceExport.js';
 

@@ -195,6 +195,10 @@ describe('fetchTransactions — mid-run re-auth', () => {
       provider,
       browser: new FakeBrowserManager(),
       sessionStore: new FakeSessionStore(),
+      // Inject in-memory checkpoint/seen stores so the test never touches the
+      // real (config-driven) filesystem dirs — keeps runs hermetic.
+      checkpointStore: new FakeCheckpointStore(),
+      seenStore: new FakeSeenStore(),
       retryDelay: 0,
     };
 
@@ -219,6 +223,10 @@ describe('fetchTransactions — mid-run re-auth', () => {
       provider,
       browser: new FakeBrowserManager(),
       sessionStore: new FakeSessionStore(),
+      // Inject in-memory checkpoint/seen stores so the test never touches the
+      // real (config-driven) filesystem dirs — keeps runs hermetic.
+      checkpointStore: new FakeCheckpointStore(),
+      seenStore: new FakeSeenStore(),
       retryDelay: 0,
     };
 
@@ -240,6 +248,10 @@ describe('fetchTransactions — mid-run re-auth', () => {
       provider,
       browser: new FakeBrowserManager(),
       sessionStore: new FakeSessionStore(),
+      // Inject in-memory checkpoint/seen stores so the test never touches the
+      // real (config-driven) filesystem dirs — keeps runs hermetic.
+      checkpointStore: new FakeCheckpointStore(),
+      seenStore: new FakeSeenStore(),
       retryDelay: 0,
     };
 
@@ -263,6 +275,10 @@ describe('fetchTransactions — mid-run re-auth', () => {
       provider,
       browser: new FakeBrowserManager(),
       sessionStore: new FakeSessionStore(),
+      // Inject in-memory checkpoint/seen stores so the test never touches the
+      // real (config-driven) filesystem dirs — keeps runs hermetic.
+      checkpointStore: new FakeCheckpointStore(),
+      seenStore: new FakeSeenStore(),
       retryDelay: 0,
     };
 

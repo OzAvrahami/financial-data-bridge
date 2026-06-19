@@ -14,7 +14,9 @@ const $ = (id) => document.getElementById(id);
 const PROVIDERS = ['cal']; // extend as providers are added
 
 let editorAccounts = []; // editor rows (see toEditorRow); never holds saved secrets
-let savedSettings = { daysBack: 4, accounts: [] };
+let savedSettings = { daysBack: 4, accounts: [], finance: { enabled: false, apiUrl: '', credentialKey: 'finance-default' } };
+
+const FINANCE_CREDENTIAL_KEY = 'finance-default';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -87,6 +89,7 @@ async function loadSettings() {
     editorAccounts = (settings.accounts ?? []).map(toEditorRow);
     renderEditor();
     renderSourceAccounts();
+    loadFinanceUI(settings.finance);
     log(`Settings loaded — ${editorAccounts.length} account(s), days back ${settings.daysBack}.`);
   } catch (err) {
     log(`Failed to load settings: ${err.message}`);
@@ -304,7 +307,80 @@ function collectSettings() {
     if (a.credentialsEnv) out.credentials = a.credentialsEnv; // preserve dev .env refs
     return out;
   });
-  return { daysBack: $('days-back').value, accounts };
+  return { daysBack: $('days-back').value, accounts, finance: collectFinance() };
+}
+
+// ── Financial System Integration ───────────────────────────────────────────────
+
+function financeCredentialKey() {
+  return (savedSettings.finance && savedSettings.finance.credentialKey) || FINANCE_CREDENTIAL_KEY;
+}
+
+function collectFinance() {
+  return {
+    enabled:       $('finance-enabled').checked,
+    apiUrl:        $('finance-url').value.trim(),
+    credentialKey: financeCredentialKey(),
+  };
+}
+
+function loadFinanceUI(finance = {}) {
+  $('finance-enabled').checked = finance.enabled === true;
+  $('finance-url').value = finance.apiUrl ?? '';
+  refreshFinanceStatus();
+}
+
+async function refreshFinanceStatus() {
+  const badge = $('finance-status');
+  try {
+    const s = await window.bridge.getFinanceStatus(financeCredentialKey());
+    if (s && s.available === false) { badge.textContent = 'secure storage unavailable'; badge.className = 'badge badge-off'; }
+    else if (s && s.saved)          { badge.textContent = 'Saved';     badge.className = 'badge badge-on'; }
+    else                             { badge.textContent = 'Not saved'; badge.className = 'badge badge-off'; }
+  } catch { badge.textContent = 'unknown'; badge.className = 'badge badge-off'; }
+}
+
+async function onSaveFinanceSecret() {
+  const secret = $('finance-key').value;
+  if (!secret) { log('Enter an API key before saving.'); return; }
+  // Persist the URL/enabled flag first so the credentialKey reference is recorded.
+  const ok = await persistSettings({ silent: true });
+  if (!ok) { log('Could not save finance settings; key not stored.'); return; }
+  try {
+    const res = await window.bridge.saveFinanceSecret(financeCredentialKey(), secret);
+    if (!res || !res.ok) throw new Error(res?.error || 'unknown error');
+    $('finance-key').value = ''; // never keep the secret in the DOM
+    log('Finance API key saved (encrypted by OS).');
+    refreshFinanceStatus();
+  } catch (err) { log(`Failed to save finance key: ${err.message}`); }
+}
+
+async function onDeleteFinanceSecret() {
+  try {
+    const res = await window.bridge.deleteFinanceSecret(financeCredentialKey());
+    if (!res || !res.ok) throw new Error(res?.error || 'unknown error');
+    $('finance-key').value = '';
+    log(res.removed ? 'Finance API key deleted.' : 'No finance API key was stored.');
+    refreshFinanceStatus();
+  } catch (err) { log(`Failed to delete finance key: ${err.message}`); }
+}
+
+async function onTestFinanceConnection() {
+  const result = $('finance-test-result');
+  result.textContent = 'Testing…';
+  result.className = 'hint';
+  try {
+    const res = await window.bridge.testFinanceConnection({
+      apiUrl: $('finance-url').value.trim(),
+      credentialKey: financeCredentialKey(),
+    });
+    if (res && res.ok) { result.textContent = `✔ ${res.message}`; result.className = 'hint'; }
+    else { result.textContent = `✖ ${res?.message || 'Connection failed'}`; result.className = 'hint err'; }
+    log(`Finance connection test: ${res?.message || 'no result'}`);
+  } catch (err) {
+    result.textContent = `✖ ${err.message}`; result.className = 'hint err';
+    log(`Finance connection test failed: ${err.message}`);
+  }
 }
 
 function showDaysBackError(msg) {
@@ -345,14 +421,88 @@ function addAccount() {
   renderEditor();
 }
 
-// ── Fetch actions (settings-driven mock) ──────────────────────────────────────
+// ── Fetch actions (real bridge-core automation) ───────────────────────────────
+
+let fetchRunning = false;
+
+function setFetchRunning(on) {
+  fetchRunning = on;
+  $('btn-fetch-all').disabled = on;
+  $('btn-fetch-default').disabled = on;
+}
+
+// Render a single secret-free progress event from the engine into the Run Log.
+function formatProgress(evt) {
+  const who = evt.displayName || evt.providerAccountId || evt.provider || 'account';
+  switch (evt.type) {
+    case 'account-start':
+      return `▶ ${who} — starting (days back ${evt.daysBack ?? 'global'})…`;
+    case 'login':
+      return `   ${who} — ${evt.sessionReused ? 'reused saved session' : 'logged in'}.`;
+    case 'fetched':
+      return `   ${who} — fetched ${evt.transactionsFetched} transaction(s)`
+        + (evt.pendingSkipped ? `, ${evt.pendingSkipped} pending skipped` : '')
+        + (evt.skipped ? `, ${evt.skipped} extraction skip(s)` : '') + '.';
+    case 'dedup':
+      return `   ${who} — ${evt.created} new, ${evt.updated} updated, ${evt.unchanged} unchanged, ${evt.duplicates} duplicate(s).`;
+    case 'export':
+      return evt.exported > 0
+        ? `   ${who} — exported ${evt.exported} transaction(s)` + (evt.filePath ? ` → ${evt.filePath}` : '') + '.'
+        : `   ${who} — nothing new to export.`;
+    case 'account-done':
+      return `✔ ${who} — done (${evt.status}).`;
+    case 'account-error':
+      return `✖ ${who} — ${evt.error}`;
+    case 'finance-start':
+      return `▶ Finance export — sending up to ${evt.total} transaction(s)…`;
+    case 'finance-done':
+      return `✔ Finance export — sent ${evt.sent} (${evt.qualifying} qualifying, ${evt.skipped} skipped).`;
+    case 'finance-error':
+      return `✖ Finance export — ${evt.error}`;
+    default:
+      return null;
+  }
+}
+
+function renderRunSummary(res) {
+  const s = res.summary || {};
+  const head =
+    `<div><strong>${escapeHtml(res.mode)} run</strong> — `
+    + `${s.succeeded ?? 0}/${s.totalAccounts ?? res.accounts.length} ok, `
+    + `${s.failed ?? 0} failed, ${s.totalTransactionsExported ?? 0} exported `
+    + `(days back ${res.daysBack}).</div>`;
+  const rows = (res.accounts || []).map(a => {
+    const who = escapeHtml(a.displayName || a.providerAccountId);
+    if (a.status === 'failed') {
+      return `<div class="muted">✖ ${who} — ${escapeHtml(a.error || 'failed')}</div>`;
+    }
+    return `<div class="muted">✔ ${who} — ${a.exported} exported `
+      + `(${a.created} new, ${a.updated} updated, ${a.unchanged} unchanged, `
+      + `${a.duplicates} dup, ${a.pendingSkipped} pending)</div>`;
+  }).join('');
+
+  let financeRow = '';
+  const f = res.finance;
+  if (f && f.enabled) {
+    if (f.ok)            financeRow = `<div class="muted">↗ Finance export — sent ${f.sent} of ${f.qualifying} qualifying.</div>`;
+    else                 financeRow = `<div class="err">↗ Finance export failed — ${escapeHtml(f.error || 'unknown error')}</div>`;
+  } else if (f && f.enabled === false) {
+    financeRow = `<div class="muted">↗ Finance export disabled.</div>`;
+  }
+
+  setLastRunSummary(head + rows + financeRow);
+}
 
 async function runFetch(mode) {
+  if (fetchRunning) { log('A fetch is already running — please wait for it to finish.'); return; }
+
   const dv = validateDaysBack($('days-back').value);
   showDaysBackError(dv.valid ? '' : dv.error);
   if (!dv.valid) { log(`Fetch blocked — ${dv.error}.`); return; }
 
-  log(`${mode === 'default' ? 'Fetch default account' : 'Fetch all accounts'} requested (days back ${dv.value})…`);
+  setFetchRunning(true);
+  setStatus('Fetching…', false);
+  log(`${mode === 'default' ? 'Fetch default account' : 'Fetch all accounts'} started (days back ${dv.value})…`);
   try {
     const res = await window.bridge.runFetch({ mode, daysBack: dv.value });
     if (!res || !res.ok) {
@@ -360,16 +510,15 @@ async function runFetch(mode) {
       setLastRunSummary(`<span class="err">${escapeHtml(res?.error || 'Fetch failed')}</span>`);
       return;
     }
-    const names = res.accounts.map(a => `${a.displayName || a.providerAccountId} (${a.daysBack}d)`);
-    log(`MOCK ${res.mode} fetch — would run ${res.accounts.length} account(s): ${names.join(', ')}.`);
-    res.accounts.forEach(a => log(`  • ${a.provider} · ${a.providerAccountId} — days back ${a.daysBack} (simulated, 0 transactions)`));
-    setLastRunSummary(
-      `<div><strong>Mock ${escapeHtml(res.mode)} run</strong> — ${res.accounts.length} account(s), days back ${res.daysBack}.</div>` +
-      `<div class="muted">${escapeHtml(names.join(', '))}</div>` +
-      `<div class="muted">No real automation performed (fetch is still mocked).</div>`
-    );
+    renderRunSummary(res);
+    log(`Run complete — ${res.summary?.succeeded ?? 0} ok, ${res.summary?.failed ?? 0} failed, `
+      + `${res.summary?.totalTransactionsExported ?? 0} transaction(s) exported.`);
   } catch (err) {
     log(`Fetch failed: ${err.message}`);
+    setLastRunSummary(`<span class="err">${escapeHtml(err.message)}</span>`);
+  } finally {
+    setFetchRunning(false);
+    setStatus('Ready', true);
   }
 }
 
@@ -381,6 +530,9 @@ function wire() {
   $('btn-fetch-all').addEventListener('click', () => runFetch('all'));
   $('btn-fetch-default').addEventListener('click', () => runFetch('default'));
   $('btn-clear-log').addEventListener('click', () => { $('log').innerHTML = ''; log('Log cleared.'); });
+  $('btn-finance-save').addEventListener('click', onSaveFinanceSecret);
+  $('btn-finance-delete').addEventListener('click', onDeleteFinanceSecret);
+  $('btn-finance-test').addEventListener('click', onTestFinanceConnection);
   $('days-back').addEventListener('input', () => {
     const dv = validateDaysBack($('days-back').value);
     showDaysBackError(dv.valid ? '' : dv.error);
@@ -389,6 +541,13 @@ function wire() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   wire();
+  // Stream live, secret-free progress from the engine into the Run Log.
+  if (window.bridge.onFetchProgress) {
+    window.bridge.onFetchProgress((evt) => {
+      const line = formatProgress(evt);
+      if (line) log(line);
+    });
+  }
   log('Financial Data Bridge desktop started.');
   await loadEnv();
   await loadSettings();

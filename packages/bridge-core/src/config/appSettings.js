@@ -75,6 +75,23 @@ function sanitizeAccountForStorage(a = {}) {
   return out;
 }
 
+/** Default credentialKey for the finance-system secret in the OS-secure store. */
+export const FINANCE_CREDENTIAL_KEY = 'finance-default';
+
+/**
+ * Strip the finance-integration block to safe, persistable fields.
+ * The API key is a SECRET and is never stored here — only the credentialKey
+ * reference (the key itself lives in the OS-encrypted store). The base URL is
+ * non-secret configuration and is stored in plaintext.
+ */
+function sanitizeFinanceForStorage(raw = {}) {
+  return {
+    enabled:       raw.enabled === true,
+    apiUrl:        String(raw.apiUrl ?? '').trim(),
+    credentialKey: String(raw.credentialKey || FINANCE_CREDENTIAL_KEY).trim() || FINANCE_CREDENTIAL_KEY,
+  };
+}
+
 /** Force exactly one default among the accounts (first wins; fallback to first). */
 function ensureSingleDefault(accounts) {
   let seen = false;
@@ -125,7 +142,8 @@ export function loadAppSettings(opts = {}) {
   }
 
   ensureSingleDefault(accounts);
-  return { daysBack, accounts };
+  const finance = sanitizeFinanceForStorage(raw?.finance ?? {});
+  return { daysBack, accounts, finance };
 }
 
 /**
@@ -142,7 +160,9 @@ export function saveAppSettings(settings = {}, opts = {}) {
   const accounts = (Array.isArray(settings.accounts) ? settings.accounts : []).map(sanitizeAccountForStorage);
   ensureSingleDefault(accounts);
 
-  const payload = { daysBack: dv.value, accounts };
+  const finance = sanitizeFinanceForStorage(settings.finance ?? {});
+
+  const payload = { daysBack: dv.value, accounts, finance };
 
   mkdirSync(dirname(configPath) || '.', { recursive: true });
   const tmp = configPath + '.tmp';

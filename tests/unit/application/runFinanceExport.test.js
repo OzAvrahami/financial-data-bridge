@@ -15,8 +15,10 @@ import {
   runFinanceExport,
   planFinanceExport,
   loadTransactionFile,
+  testFinanceConnection,
   FinanceExportInputError,
 } from '../../../packages/bridge-core/src/application/runFinanceExport.js';
+import { exportToFinanceSystem } from '../../../packages/bridge-core/src/application/exportToFinanceSystem.js';
 
 const COMPLETED_TX = {
   provider: 'CAL', accountId: 'acct', transactionDate: '2026-05-10',
@@ -86,12 +88,12 @@ describe('runFinanceExport — execute credential guards', () => {
     if (saved.key === undefined) delete process.env.FINANCE_API_KEY; else process.env.FINANCE_API_KEY = saved.key;
   });
 
-  it('throws (before any network call) when FINANCE_API_URL is missing', async () => {
+  it('throws (before any network call) when the finance URL is missing', async () => {
     delete process.env.FINANCE_API_URL;
     delete process.env.FINANCE_API_KEY;
     await assert.rejects(
       () => runFinanceExport({ transactions: [COMPLETED_TX], execute: true }),
-      /FINANCE_API_URL/
+      /Finance API URL is not configured/
     );
   });
 
@@ -100,7 +102,85 @@ describe('runFinanceExport — execute credential guards', () => {
     delete process.env.FINANCE_API_KEY;
     await assert.rejects(
       () => runFinanceExport({ transactions: [COMPLETED_TX], execute: true }),
-      /FINANCE_API_KEY/
+      /Finance API key is not saved/
     );
+  });
+
+  it('error messages never reference .env', async () => {
+    delete process.env.FINANCE_API_URL;
+    delete process.env.FINANCE_API_KEY;
+    await assert.rejects(
+      () => runFinanceExport({ transactions: [COMPLETED_TX], execute: true }),
+      (err) => { assert.ok(!/\.env/i.test(err.message), 'must not mention .env'); return true; }
+    );
+  });
+
+  it('uses the in-memory financeConfig instead of env (validation passes; sending uses injected config)', async () => {
+    delete process.env.FINANCE_API_URL;
+    delete process.env.FINANCE_API_KEY;
+    // With financeConfig provided, the missing-credential guards must NOT trigger.
+    // We stop before the network by passing an empty transaction list (nothing qualifies).
+    const r = await runFinanceExport({
+      transactions: [],
+      execute: true,
+      financeConfig: { apiUrl: 'https://fin.example/api', apiKey: 'tok' },
+    });
+    assert.equal(r.executed, true);
+    assert.equal(r.sentCount, 0);
+    assert.equal(r.apiUrl, 'https://fin.example/api'); // returned URL is the safe (query-stripped) form
+  });
+});
+
+describe('testFinanceConnection', () => {
+  const CFG = { apiUrl: 'https://fin.example/api', apiKey: 'sk_test_TOKEN' };
+
+  it('reports OK for any HTTP response (e.g. 405 on a POST-only endpoint)', async () => {
+    const r = await testFinanceConnection(CFG, { fetch: async () => ({ status: 405 }) });
+    assert.equal(r.ok, true);
+    assert.match(r.message, /HTTP 405/);
+  });
+
+  it('reports auth failure for 401/403', async () => {
+    const r = await testFinanceConnection(CFG, { fetch: async () => ({ status: 401 }) });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /Authentication failed/);
+  });
+
+  it('reports a redacted connection failure when fetch throws', async () => {
+    const r = await testFinanceConnection(CFG, {
+      fetch: async () => { throw new Error('ECONNREFUSED to sk_test_TOKEN'); },
+    });
+    assert.equal(r.ok, false);
+    assert.doesNotMatch(r.message, /sk_test_TOKEN/, 'secret must be redacted');
+    assert.match(r.message, /\[REDACTED\]/);
+  });
+
+  it('throws a clear error when URL or key is missing', async () => {
+    await assert.rejects(() => testFinanceConnection({ apiKey: 'x' }), /Finance API URL is not set/);
+    await assert.rejects(() => testFinanceConnection({ apiUrl: 'https://x' }), /Finance API key is not saved/);
+  });
+});
+
+describe('exportToFinanceSystem — secret redaction on failure', () => {
+  it('redacts the API key from a non-OK HTTP error', async () => {
+    const apiKey = 'sk_live_DEADBEEF';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 500,
+      text: async () => `server error referencing ${apiKey} and more`,
+    });
+    try {
+      await assert.rejects(
+        () => exportToFinanceSystem([COMPLETED_TX], { apiUrl: 'https://fin.example/api', apiKey }),
+        (err) => {
+          assert.doesNotMatch(err.message, /sk_live_DEADBEEF/, 'API key must be redacted');
+          assert.match(err.message, /HTTP 500/);
+          return true;
+        }
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
