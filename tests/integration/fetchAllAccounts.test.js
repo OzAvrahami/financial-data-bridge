@@ -120,7 +120,7 @@ describe('fetchAllAccounts — source-account-scoped dedup identity', () => {
 
 describe('SeenStore — separate state path per provider/account', () => {
   it('produces a distinct file path per provider + providerAccountId', () => {
-    const store = new SeenStore('.seen');
+    const store = new SeenStore('runtime/seen');
     const ozCal   = store.filePath('cal', 'oz_cal');
     const wifeCal = store.filePath('cal', 'wife_cal');
     const ozMax   = store.filePath('max', 'oz_max');
@@ -130,8 +130,8 @@ describe('SeenStore — separate state path per provider/account', () => {
     assert.notEqual(wifeCal, ozMax);
   });
 
-  it('keeps the legacy default path unchanged (backward compatibility)', () => {
-    const store = new SeenStore('.seen');
+  it('keeps the default-account path unsuffixed (backward compatibility)', () => {
+    const store = new SeenStore('runtime/seen');
     assert.match(store.filePath('cal', 'default'), /cal\.json$/);   // no suffix for default
     assert.match(store.filePath('cal'),            /cal\.json$/);
   });

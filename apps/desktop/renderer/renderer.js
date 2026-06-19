@@ -102,7 +102,7 @@ function toEditorRow(a) {
     enabled:           a.enabled !== false,
     default:           a.default === true,
     daysBack:          Number.isInteger(a.daysBack) ? a.daysBack : '',
-    // Preserve developer .env fallback refs (not shown in UI) so saves don't drop them.
+    // Preserve any pre-existing credential reference fields (not shown in UI) so saves don't drop them.
     credentialsEnv:    a.credentials ? { ...a.credentials } : undefined,
   };
 }

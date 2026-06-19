@@ -37,7 +37,7 @@ function core() {
 }
 
 // Resolve the accounts config file to an absolute path anchored at the repo root,
-// so it matches what the CLI uses regardless of the Electron process CWD.
+// so it is stable regardless of the Electron process CWD.
 function accountsConfigPath(config) {
   const p = config.accounts.configPath;
   return path.isAbsolute(p) ? p : path.join(__dirname, '..', '..', p);

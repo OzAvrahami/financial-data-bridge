@@ -1,24 +1,26 @@
 /**
- * Desktop/app settings persistence.
+ * Desktop app settings persistence.
  *
- * Reads and writes the SAME private config file the CLI uses
+ * Reads and writes the private accounts config file
  * (`config.accounts.configPath`, default `accounts.config.json`, gitignored),
- * extended to an object form:
+ * in object form:
  *
  *   {
  *     "daysBack": 4,
  *     "accounts": [
  *       { "provider": "cal", "providerAccountId": "default", "displayName": "CAL (default)",
  *         "enabled": true, "default": true, "daysBack": null,
- *         "credentials": { "usernameEnv": "CAL_USERNAME", "passwordEnv": "CAL_PASSWORD" } }
+ *         "credentialKey": "cal-default" }
  *     ]
  *   }
  *
- * The legacy array form is still accepted on read (via loadSourceAccounts).
+ * Credentials themselves live in the OS-encrypted store (Electron safeStorage),
+ * keyed by `credentialKey`; only that key reference is persisted here.
  *
- * SECURITY: this module only ever persists/returns credential ENV-VAR NAMES
- * (`usernameEnv`/`passwordEnv`) — never resolved usernames/passwords. The
- * settings UI therefore never sees secrets.
+ * SECURITY: this module never persists or returns resolved usernames/passwords —
+ * only the `credentialKey` reference. The settings UI therefore never sees
+ * secrets. (An `{ usernameEnv, passwordEnv }` reference form is still tolerated
+ * on read for engine-internal credential resolution, but is not written by the UI.)
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
@@ -60,8 +62,9 @@ function sanitizeAccountForStorage(a = {}) {
   // Reference to OS-secure-stored credentials (desktop). NOT a secret — just a key.
   if (a.credentialKey) out.credentialKey = String(a.credentialKey).trim();
 
-  // Credential ENV-VAR NAMES only (developer .env fallback). Raw username/password
-  // are intentionally dropped and NEVER written to this file.
+  // Tolerate an engine-internal credential reference ({ usernameEnv, passwordEnv })
+  // if already present. Raw username/password are intentionally dropped and NEVER
+  // written to this file; the UI persists only credentialKey.
   const usernameEnv = a.credentials?.usernameEnv ?? a.usernameEnv;
   const passwordEnv = a.credentials?.passwordEnv ?? a.passwordEnv;
   if (usernameEnv || passwordEnv) {

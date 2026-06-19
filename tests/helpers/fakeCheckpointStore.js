@@ -14,7 +14,7 @@ export class FakeCheckpointStore {
 
   filePath(provider, accountId = 'default') {
     const suffix = accountId && accountId !== 'default' ? `_${accountId}` : '';
-    return `.checkpoints/${provider}${suffix}.json`;
+    return `runtime/checkpoints/${provider}${suffix}.json`;
   }
 
   async load(provider, accountId = 'default') {

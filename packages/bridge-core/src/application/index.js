@@ -2,8 +2,7 @@
  * Application API surface.
  *
  * This is the stable set of reusable use-case functions that entry points call:
- *   - the Electron desktop app (apps/desktop) — primary
- *   - the developer CLI fallback (apps/cli/index.js)
+ *   - the Electron desktop app (apps/desktop)
  *   - tests
  *
  * Entry points stay thin: they parse input and render output. All business logic
@@ -11,7 +10,7 @@
  */
 
 // Fetch use case — authenticate, fetch, dedup, optionally export. Provider-agnostic
-// (currently CAL); the single fetch entry point used by the desktop app, CLI, and tests.
+// (currently CAL); the single fetch entry point used by the desktop app and tests.
 export { fetchTransactions } from './fetchTransactions.js';
 
 // Multi-account fetch — run each configured source account sequentially and

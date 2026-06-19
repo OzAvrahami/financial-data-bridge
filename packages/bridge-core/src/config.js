@@ -32,9 +32,8 @@ export const config = {
     earlyStopThreshold: parseInt(env('EARLY_STOP_THRESHOLD', '10'), 10),
   },
 
-  // Runtime/local state lives under runtime/ (see runtimeMigration.js for the
-  // non-destructive copy from the legacy .seen/.sessions/.checkpoints/exports
-  // locations). Each path remains individually overridable via env.
+  // Runtime/local state lives under runtime/ (gitignored). Each path remains
+  // individually overridable via env for development.
   export: {
     path: env('EXPORT_PATH', 'runtime/exports'),
   },

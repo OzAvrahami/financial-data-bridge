@@ -8,8 +8,8 @@ import {
  * Raised for problems with the *input* to a finance export — a missing/unreadable
  * file, a malformed payload, or missing API credentials. Callers can distinguish
  * these (user-correctable, validated before any network call) from errors thrown
- * mid-send by exportToFinanceSystem(). The CLI uses this to choose its exit
- * message; a desktop UI can use it to show a friendly validation message.
+ * mid-send by exportToFinanceSystem(); the desktop UI uses it to show a friendly
+ * validation message.
  */
 export class FinanceExportInputError extends Error {
   constructor(message) {
@@ -19,7 +19,7 @@ export class FinanceExportInputError extends Error {
 }
 
 /**
- * Read and parse a transactions JSON file produced by the fetch command.
+ * Read and parse a transactions JSON file produced by a fetch run.
  *
  * @param {string} filePath
  * @returns {object[]} parsed transaction array
@@ -62,17 +62,17 @@ export function planFinanceExport(transactions) {
  * provided array), computes the plan, and — only when `execute` is true —
  * validates credentials and sends qualifying transactions to the finance system.
  *
- * This is the single entry point shared by the CLI, future desktop UI, and tests.
- * It performs no console output and never calls process.exit(); it returns a
- * structured result or throws.
+ * This is the single entry point shared by the desktop app and tests. It performs
+ * no console output and never calls process.exit(); it returns a structured
+ * result or throws.
  *
  * @param {object}   options
  * @param {string}   [options.filePath]      Path to a transactions JSON file. Required unless `transactions` is given.
  * @param {object[]} [options.transactions]  Pre-loaded transaction array (takes precedence over filePath).
  * @param {boolean}  [options.execute=false] If false (default), dry-run: nothing is sent. If true, send for real.
  * @param {function} [options.onBeforeSend]  Optional async hook called just before sending (execute mode only),
- *                                           with { apiUrl, plan, filePath, transactions }. Used by the CLI to
- *                                           print its header in the right order; a UI can ignore it.
+ *                                           with { apiUrl, plan, filePath, transactions }. A UI can use it
+ *                                           to surface progress, or ignore it.
  *
  * @returns {Promise<{
  *   executed: boolean, filePath: string|null, total: number,

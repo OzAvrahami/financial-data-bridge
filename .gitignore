@@ -5,13 +5,12 @@ node_modules/
 .claude/
 
 # ── Environment & credentials ────────────────────────────────────────────────
-# Real secrets live in .env / .env.local — never commit them.
-# .env.example is the safe, committed template (placeholders only).
+# Normal desktop use needs no .env. If present (developer machine), it may hold
+# non-secret overrides only — never commit it.
 .env
 .env.*
-!.env.example
-# Local multi-account config (references credential keys / env-var names — no
-# secrets). accounts.config.example.json is the safe, committed template.
+# Local multi-account config (provider/account metadata + a credentialKey
+# reference — no secrets). accounts.config.example.json is the committed template.
 accounts.config.json
 
 # Encrypted credential stores (Electron safeStorage). These normally live in the
@@ -20,8 +19,8 @@ accounts.config.json
 credentials.enc.json
 
 # ── Playwright / browser / session artifacts ─────────────────────────────────
-# Session state files contain auth cookies — never commit these.
-.sessions/
+# Session state files contain auth cookies — never commit these. Real session
+# state lives under runtime/sessions/ (ignored via the runtime/ rule below).
 .storage/
 storageState*.json
 test-results/
@@ -36,16 +35,6 @@ playwright/.cache/
 # kept via runtime/.gitkeep; its contents are ignored.
 runtime/*
 !runtime/.gitkeep
-
-# Legacy pre-restructure locations — keep ignored if they still exist locally.
-.seen/
-.sessions/
-.checkpoints/
-.data/
-exports/
-
-# ── Financial / private generated data ───────────────────────────────────────
-# (Exports now live under runtime/exports/ — covered by the runtime/ rule above.)
 
 # ── Logs & debug output ──────────────────────────────────────────────────────
 logs/

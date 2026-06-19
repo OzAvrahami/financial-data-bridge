@@ -8,9 +8,7 @@
     "desktop": "electron apps/desktop/main.cjs",
     "test": "node tests/runner.js tests",
     "test:unit": "node tests/runner.js tests/unit",
-    "test:integration": "node tests/runner.js tests/integration",
-    "dev:fetch": "node apps/cli/index.js",
-    "dev:fetch:all": "node apps/cli/index.js --all-accounts"
+    "test:integration": "node tests/runner.js tests/integration"
   },
   "keywords": [
     "electron",
@@ -21,6 +19,7 @@
     "transactions",
     "cal"
   ],
+  "private": true,
   "author": "",
   "license": "MIT",
   "dependencies": {

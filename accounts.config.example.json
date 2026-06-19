@@ -8,10 +8,7 @@
       "enabled": true,
       "default": true,
       "daysBack": null,
-      "credentials": {
-        "usernameEnv": "OZ_CAL_USERNAME",
-        "passwordEnv": "OZ_CAL_PASSWORD"
-      }
+      "credentialKey": "cal-oz-cal"
     },
     {
       "provider": "cal",
@@ -20,10 +17,7 @@
       "enabled": true,
       "default": false,
       "daysBack": 7,
-      "credentials": {
-        "usernameEnv": "WIFE_CAL_USERNAME",
-        "passwordEnv": "WIFE_CAL_PASSWORD"
-      }
+      "credentialKey": "cal-wife-cal"
     }
   ]
 }

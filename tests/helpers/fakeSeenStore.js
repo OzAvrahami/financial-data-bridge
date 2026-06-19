@@ -25,7 +25,7 @@ export class FakeSeenStore {
 
   filePath(provider, accountId = 'default') {
     const suffix = accountId && accountId !== 'default' ? `_${accountId}` : '';
-    return `.seen/${provider}${suffix}.json`;
+    return `runtime/seen/${provider}${suffix}.json`;
   }
 
   async load(provider, accountId = 'default') {

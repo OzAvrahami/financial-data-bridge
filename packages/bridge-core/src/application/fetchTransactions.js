@@ -19,7 +19,7 @@ import { providerRegistry } from '../core/providerRegistry.js';
  * handle mid-run re-authentication, deduplicate, optionally export, and return a
  * structured execution report alongside the data.
  *
- * Both CLI and API call this function — no business logic lives in either entrypoint.
+ * The desktop app and tests call this function — no business logic lives in the entry point.
  *
  * @param {object} opts
  * @param {string}  [opts.providerName]          - e.g. 'cal'. Defaults to config.provider.
