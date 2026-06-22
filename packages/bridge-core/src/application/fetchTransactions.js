@@ -2,7 +2,7 @@ import { join } from 'path';
 import { BrowserManager } from '../core/BrowserManager.js';
 import { SessionStore } from '../infrastructure/sessionStore.js';
 import { CheckpointStore } from '../infrastructure/checkpointStore.js';
-import { SeenStore, fingerprint, contentHash, classifyTransaction, assignOccurrenceKeys } from '../infrastructure/dedup.js';
+import { SeenStore, contentHash, classifyTransaction, assignOccurrenceKeys } from '../infrastructure/dedup.js';
 import { logger } from '../infrastructure/logger.js';
 import { withRetry } from '../infrastructure/retry.js';
 import { metrics } from '../infrastructure/metrics.js';
@@ -32,8 +32,10 @@ import { providerRegistry } from '../core/providerRegistry.js';
  * @param {boolean} [opts.skipExport]            - Skip writing the JSON file
  * @param {boolean} [opts.resume]                - Resume from checkpoint if one exists (default: false)
  * @param {boolean} [opts.fullFetch]             - Ignore seen store; export all transactions (default: false)
- * @param {boolean} [opts.incremental]           - Stop early on consecutive already-seen rows
- * @param {number}  [opts.earlyStopThreshold]    - Consecutive already-seen rows before stopping
+ *
+ * The full requested date range (daysBack) is ALWAYS scanned end to end. The
+ * seen/dedup state decides only whether a transaction is exported — never whether
+ * scanning continues. There is no early-stop optimization.
  *
  * @param {object} _deps  - Injectable overrides for testing. Not used in production.
  * @param {object}  [_deps.provider]
@@ -43,7 +45,10 @@ import { providerRegistry } from '../core/providerRegistry.js';
  * @param {object}  [_deps.seenStore]
  * @param {number}  [_deps.retryDelay]
  *
- * @returns {Promise<{ transactions: Transaction[], filePath: string|null, report: RunReport }>}
+ * @returns {Promise<{ transactions: Transaction[], consideredTransactions: Transaction[], filePath: string|null, report: RunReport }>}
+ *   `transactions` is the local-export set (created + updated). `consideredTransactions`
+ *   is every transaction inspected this run, each tagged with `localDedupStatus`
+ *   ('new' | 'updated' | 'unchanged' | 'duplicate') for downstream finance sync.
  */
 export async function fetchTransactions(opts = {}, _deps = {}) {
   const providerName  = opts.providerName  ?? config.provider;
@@ -60,11 +65,8 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
   const sessionDir    = opts.sessionDir    ?? config.session.storageDir;
   const skipExport    = opts.skipExport    ?? false;
 
-  // Phase 4 options
-  const resume             = opts.resume             ?? false;
-  const fullFetch          = opts.fullFetch           ?? false;
-  const incremental        = opts.incremental        ?? fetchConfig.incremental        ?? true;
-  const earlyStopThreshold = opts.earlyStopThreshold ?? fetchConfig.earlyStopThreshold ?? 3;
+  const resume    = opts.resume    ?? false;
+  const fullFetch = opts.fullFetch ?? false;
 
   const report = createRunReport({ provider: providerName, accountId, providerAccountId, displayName });
 
@@ -149,8 +151,20 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
     // ── Initial authentication (if needed) ────────────────────────────────
     if (!authenticated) {
+      // A restored-but-invalid session leaves stale auth cookies in the context.
+      // Logging in on top of that dirty state is what fails (the logged-out login
+      // entry never renders). Drop the stale persisted session so a later run
+      // won't reload it, and clear the live context before EACH attempt so every
+      // try — including retries — starts from a clean, logged-out page.
+      if (savedSession) {
+        await sessionStore.clear(providerName, accountId).catch(() => {});
+      }
+
       await withRetry(
-        () => provider.login(credentials),
+        async () => {
+          await browser.clearSession().catch(() => {});
+          await provider.login(credentials);
+        },
         {
           attempts: 2,
           delay: retryDelay,
@@ -167,25 +181,12 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     emit({ type: 'login', sessionReused: report.sessionReused === true });
 
     // ── Build onProgress callback ─────────────────────────────────────────
-    // Called by the provider after each extracted transaction. Handles:
-    //   1. Checkpoint save (for recovery on interruption)
-    //   2. Classification for incremental early-stop (consecutive unchanged)
-    //
-    // Note: classification here drives early-stop only. The authoritative
-    // dedup/export classification runs after the full fetch loop below.
-    let consecutiveUnchanged = 0;
-
-    const onProgress = async ({ index, transaction }) => {
-      const fp   = fingerprint(transaction);
-      const ch   = contentHash(transaction);
-      const kind = classifyTransaction(seenStore, fp, ch, fullFetch);
-
-      if (kind === 'unchanged') {
-        consecutiveUnchanged++;
-      } else {
-        consecutiveUnchanged = 0; // created or updated resets the counter
-      }
-
+    // Called by the provider after each extracted transaction, solely to save a
+    // checkpoint for crash/interruption recovery. It NEVER stops the scan: the
+    // entire requested date range is always inspected so that newly finalized,
+    // previously missed, or modified transactions anywhere in the window are
+    // discoverable. Dedup/export decisions happen after the full fetch loop below.
+    const onProgress = async ({ index }) => {
       await checkpointStore.save(providerName, accountId, {
         provider: providerName,
         accountId,
@@ -195,16 +196,6 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
         transactions: priorTransactions,
         warnings:     priorWarnings,
       });
-
-      // Early stop: return false to signal the provider to break its loop
-      if (incremental && earlyStopThreshold > 0 && consecutiveUnchanged >= earlyStopThreshold) {
-        report.earlyStopTriggered = true;
-        report.earlyStopReason    = `${earlyStopThreshold} consecutive unchanged transactions`;
-        logger.info(`Early stop triggered: ${report.earlyStopReason}`, { provider: providerName });
-        return false;
-      }
-
-      return true;
     };
 
     // ── Fetch transactions (with mid-run re-auth guard) ───────────────────
@@ -237,7 +228,12 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
         });
 
         await withRetry(
-          () => provider.login(credentials),
+          async () => {
+            // Re-auth also starts from a clean context: the mid-run session loss
+            // left stale/redirected state that a plain re-login would inherit.
+            await browser.clearSession().catch(() => {});
+            await provider.login(credentials);
+          },
           {
             attempts: 2,
             delay:    retryDelay,
@@ -321,11 +317,21 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     let unchangedCount    = 0;
     let withinRunDupCount = 0;
 
+    // Every transaction considered this run, tagged with its local dedup outcome.
+    // This is the input the finance sync engine needs: finance must decide what to
+    // send based on its OWN ledger, not on the local created/updated/unchanged
+    // status, so it needs to see ALL considered transactions — not just the
+    // created/updated ones that flow into the local export file. Each tx is also
+    // stamped in place with `localDedupStatus` so it travels with the object.
+    const consideredTxs = [];
+
     for (const tx of allTransactions) {
       const key = tx.dedupKey;
 
       if (seenInRun.has(key)) {
         withinRunDupCount++;
+        tx.localDedupStatus = 'duplicate';
+        consideredTxs.push(tx);
         continue;
       }
       seenInRun.add(key);
@@ -335,13 +341,17 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
       if (kind === 'created') {
         createdCount++;
+        tx.localDedupStatus = 'new';
         exportedTxs.push(tx);
       } else if (kind === 'updated') {
         updatedCount++;
+        tx.localDedupStatus = 'updated';
         exportedTxs.push(tx);
       } else {
         unchangedCount++;
+        tx.localDedupStatus = 'unchanged';
       }
+      consideredTxs.push(tx);
     }
 
     report.createdCount            = createdCount;
@@ -401,11 +411,15 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     finalizeReport(report, { status: runStatus });
     metrics.recordRun(report);
 
-    return { transactions: exportedTxs, filePath, report };
+    // `transactions` stays the local-export set (created + updated) for backward
+    // compatibility. `consideredTransactions` is the full set the finance sync
+    // engine evaluates against its own ledger.
+    return { transactions: exportedTxs, consideredTransactions: consideredTxs, filePath, report };
 
   } catch (err) {
     // Clear the stored session on known auth failures so the next run starts clean
     const isAuthFailure =
+      err?.name === 'CalLoginError' ||
       err.message?.includes('Login verification failed') ||
       err.message?.includes('login iframe did not appear') ||
       err.message?.includes('Missing credentials');

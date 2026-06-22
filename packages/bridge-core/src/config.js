@@ -25,11 +25,9 @@ export const config = {
   },
 
   fetch: {
-    daysBack:           parseInt(env('DAYS_BACK', '4'), 10),
-    // When true, stop early once earlyStopThreshold consecutive already-seen
-    // transactions are encountered (incremental mode).
-    incremental:        env('INCREMENTAL', 'true') === 'true',
-    earlyStopThreshold: parseInt(env('EARLY_STOP_THRESHOLD', '10'), 10),
+    // The full requested date range is always scanned end to end; there is no
+    // early-stop. daysBack is authoritative for how far back to fetch.
+    daysBack: parseInt(env('DAYS_BACK', '4'), 10),
   },
 
   // Runtime/local state lives under runtime/ (gitignored). Each path remains
@@ -48,6 +46,18 @@ export const config = {
 
   seen: {
     dir: env('SEEN_DIR', 'runtime/seen'),
+  },
+
+  // Per-transaction finance sync ledger — the authoritative record of whether a
+  // transaction was successfully sent to the finance system (independent of local
+  // dedup state). One file per provider+account.
+  financeLedger: {
+    dir: env('FINANCE_LEDGER_DIR', 'runtime/finance-ledger'),
+  },
+
+  // Per-run finance sync audit reports (JSON + CSV), one row per considered tx.
+  reports: {
+    dir: env('REPORTS_DIR', 'runtime/reports'),
   },
 
   // Multi-account (source account) configuration.

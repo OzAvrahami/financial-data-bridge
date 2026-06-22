@@ -57,7 +57,7 @@
         <button id="btn-fetch-default" class="btn btn-secondary">Fetch Default Account</button>
         <button id="btn-clear-log" class="btn btn-ghost">Clear Log</button>
       </div>
-      <p class="hint">Fetches real transactions from the provider (CAL) using your saved credentials. Runs accounts sequentially; only one run at a time. Watch the Run Log for progress.</p>
+      <p class="hint"><strong>Fetch Only:</strong> fetches real transactions from the provider (CAL), deduplicates, and saves the local output. It does <strong>not</strong> send anything to your finance system. To sync to finance, use the buttons in <strong>Financial System Integration</strong> below. Runs accounts sequentially; only one run at a time. Watch the Run Log for progress.</p>
     </section>
 
     <!-- Account settings (editable) -->
@@ -98,7 +98,18 @@
         <span id="finance-status" class="badge">checking…</span>
       </div>
       <p class="hint" id="finance-test-result"></p>
-      <p class="hint">The API key is encrypted by your operating system (never stored in settings, logs, or exports). The URL is saved with your settings. Enter the key and click <strong>Save Key</strong>, then <strong>Test Connection</strong>. When enabled, exporting runs automatically after each fetch.</p>
+
+      <div class="card-head">
+        <h3 style="margin:0;font-size:1rem;">Sync to Finance</h3>
+      </div>
+      <div class="actions">
+        <button id="btn-sync-all" class="btn btn-primary" disabled>Sync All to Finance</button>
+        <button id="btn-sync-default" class="btn btn-secondary" disabled>Sync Default to Finance</button>
+        <button id="btn-open-report" class="btn btn-ghost" disabled>Open Last Report</button>
+      </div>
+      <p class="hint" id="sync-disabled-hint"></p>
+
+      <p class="hint">The API key is encrypted by your operating system (never stored in settings, logs, or exports). The URL is saved with your settings. Enter the key and click <strong>Save Key</strong>, then <strong>Test Connection</strong>. <strong>Sync to Finance</strong> fetches first, then sends only transactions that have no prior successful-send record in the local finance ledger — failed or never-sent transactions are retried, and a per-transaction audit report (JSON + CSV) is written to <code>runtime/reports</code>. The Sync buttons stay disabled until finance is enabled and the URL and API key are saved.</p>
     </section>
 
     <!-- Last run summary -->
@@ -114,6 +125,6 @@
     </section>
   </main>
 
-  <script src="renderer.js"></script>
+  <script src="renderer.js" charset="utf-8"></script>
 </body>
 </html>

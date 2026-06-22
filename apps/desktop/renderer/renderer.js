@@ -18,6 +18,32 @@ let savedSettings = { daysBack: 4, accounts: [], finance: { enabled: false, apiU
 
 const FINANCE_CREDENTIAL_KEY = 'finance-default';
 
+// Whether a finance API key is currently saved (last known from the status check)
+// and the path to the most recent finance sync audit report, for the Open Report
+// button. Together with the enabled flag + URL these gate the Sync buttons.
+let financeKeySaved = false;
+let lastReportPath = null;
+
+// Friendly text for the per-transaction finance status reasons emitted by the
+// bridge-core sync engine. Keep in sync with syncTransactionsToFinance().
+const FINANCE_REASON_TEXT = {
+  run_mode_fetch_only:            'Fetch Only run — finance was not contacted',
+  finance_disabled:               'finance integration is disabled',
+  missing_api_url:                'the finance API URL is not set',
+  missing_api_key:                'no finance API key is saved',
+  fetch_failed:                   'the fetch failed, so nothing was synced',
+  transaction_not_completed:      'transaction is not completed yet',
+  charge_amount_zero_or_negative: 'no positive charge amount',
+  already_sent_successfully:      'already sent to finance previously',
+  already_sent_content_changed:   'already sent, but details changed since — review needed',
+  duplicate_in_current_batch:     'duplicate within this batch',
+  api_validation_failed:          'finance API rejected the transaction',
+  api_error:                      'finance API/network error',
+};
+function reasonText(reason) {
+  return FINANCE_REASON_TEXT[reason] || reason || 'unknown reason';
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function log(message) {
@@ -334,10 +360,12 @@ async function refreshFinanceStatus() {
   const badge = $('finance-status');
   try {
     const s = await window.bridge.getFinanceStatus(financeCredentialKey());
+    financeKeySaved = !!(s && s.saved);
     if (s && s.available === false) { badge.textContent = 'secure storage unavailable'; badge.className = 'badge badge-off'; }
     else if (s && s.saved)          { badge.textContent = 'Saved';     badge.className = 'badge badge-on'; }
     else                             { badge.textContent = 'Not saved'; badge.className = 'badge badge-off'; }
-  } catch { badge.textContent = 'unknown'; badge.className = 'badge badge-off'; }
+  } catch { financeKeySaved = false; badge.textContent = 'unknown'; badge.className = 'badge badge-off'; }
+  updateSyncAvailability();
 }
 
 async function onSaveFinanceSecret() {
@@ -429,6 +457,34 @@ function setFetchRunning(on) {
   fetchRunning = on;
   $('btn-fetch-all').disabled = on;
   $('btn-fetch-default').disabled = on;
+  updateSyncAvailability();
+}
+
+/**
+ * Enable the Sync to Finance buttons only when finance is fully configured
+ * (enabled + URL + saved key) and no run is in flight. Keeps the user from
+ * triggering a finance send that the engine would only reject. The Open Report
+ * button is enabled whenever a report from this session exists.
+ */
+function updateSyncAvailability() {
+  const enabled = $('finance-enabled')?.checked === true;
+  const hasUrl  = ($('finance-url')?.value || '').trim().length > 0;
+  const ready   = enabled && hasUrl && financeKeySaved;
+  const syncAll = $('btn-sync-all');
+  const syncDef = $('btn-sync-default');
+  if (syncAll) syncAll.disabled = !ready || fetchRunning;
+  if (syncDef) syncDef.disabled = !ready || fetchRunning;
+
+  const hint = $('sync-disabled-hint');
+  if (hint) {
+    if (ready) hint.textContent = '';
+    else if (!enabled) hint.textContent = 'Enable finance integration above to sync.';
+    else if (!hasUrl)  hint.textContent = 'Set the API URL to enable syncing.';
+    else if (!financeKeySaved) hint.textContent = 'Save the API key to enable syncing.';
+  }
+
+  const openBtn = $('btn-open-report');
+  if (openBtn) openBtn.disabled = !lastReportPath;
 }
 
 // Render a single secret-free progress event from the engine into the Run Log.
@@ -454,11 +510,16 @@ function formatProgress(evt) {
     case 'account-error':
       return `✖ ${who} — ${evt.error}`;
     case 'finance-start':
-      return `▶ Finance export — sending up to ${evt.total} transaction(s)…`;
+      return `▶ Finance sync — evaluating ${evt.considered} transaction(s) against the finance ledger…`;
+    case 'finance-progress':
+      return null; // per-send ticks would be noisy; the done event reports totals
     case 'finance-done':
-      return `✔ Finance export — sent ${evt.sent} (${evt.qualifying} qualifying, ${evt.skipped} skipped).`;
+      return `✔ Finance sync — sent ${evt.sent}, already sent ${evt.alreadySent}, `
+        + `skipped ${evt.skipped}, failed ${evt.failed} (of ${evt.considered}).`;
+    case 'finance-not-attempted':
+      return `• Finance sync not attempted — ${reasonText(evt.reason)}.`;
     case 'finance-error':
-      return `✖ Finance export — ${evt.error}`;
+      return `✖ Finance sync — ${evt.error}`;
     default:
       return null;
   }
@@ -466,60 +527,111 @@ function formatProgress(evt) {
 
 function renderRunSummary(res) {
   const s = res.summary || {};
+  const accounts = res.accounts || [];
+  const sum = (key) => accounts.reduce((n, a) => n + (a[key] || 0), 0);
+  const fetched   = sum('transactionsFetched');
+  const created   = sum('created');
+  const updated   = sum('updated');
+  const unchanged = sum('unchanged');
+  const savedLocally = s.totalTransactionsExported ?? sum('exported');
+  const isSync = res.financeMode === 'sync';
+
   const head =
-    `<div><strong>${escapeHtml(res.mode)} run</strong> — `
-    + `${s.succeeded ?? 0}/${s.totalAccounts ?? res.accounts.length} ok, `
-    + `${s.failed ?? 0} failed, ${s.totalTransactionsExported ?? 0} exported `
+    `<div><strong>${isSync ? 'Sync to Finance' : 'Fetch Only'} run</strong>`
+    + ` (${escapeHtml(res.mode)} accounts) — `
+    + `${s.succeeded ?? 0}/${s.totalAccounts ?? accounts.length} ok, ${s.failed ?? 0} failed `
     + `(days back ${res.daysBack}).</div>`;
-  const rows = (res.accounts || []).map(a => {
+
+  // Common fetch/local block (identical wording for both modes).
+  const localBlock =
+    `<div class="muted">• CAL fetched ${fetched} transaction(s): `
+    + `${created} new, ${updated} updated, ${unchanged} unchanged.</div>`
+    + `<div class="muted">• Saved locally: ${savedLocally} transaction(s).</div>`;
+
+  const rows = accounts.map(a => {
     const who = escapeHtml(a.displayName || a.providerAccountId);
     if (a.status === 'failed') {
-      return `<div class="muted">✖ ${who} — ${escapeHtml(a.error || 'failed')}</div>`;
+      return `<div class="muted">&nbsp;&nbsp;✖ ${who} — ${escapeHtml(a.error || 'failed')}</div>`;
     }
-    return `<div class="muted">✔ ${who} — ${a.exported} exported `
+    return `<div class="muted">&nbsp;&nbsp;✔ ${who} — ${a.exported} saved `
       + `(${a.created} new, ${a.updated} updated, ${a.unchanged} unchanged, `
       + `${a.duplicates} dup, ${a.pendingSkipped} pending)</div>`;
   }).join('');
 
-  let financeRow = '';
-  const f = res.finance;
-  if (f && f.enabled) {
-    if (f.ok)            financeRow = `<div class="muted">↗ Finance export — sent ${f.sent} of ${f.qualifying} qualifying.</div>`;
-    else                 financeRow = `<div class="err">↗ Finance export failed — ${escapeHtml(f.error || 'unknown error')}</div>`;
-  } else if (f && f.enabled === false) {
-    financeRow = `<div class="muted">↗ Finance export disabled.</div>`;
+  // Finance block differs by mode.
+  let financeBlock;
+  const f = res.finance || {};
+  if (!isSync) {
+    financeBlock = `<div class="muted">• Finance sync: <strong>not executed</strong> — mode is Fetch Only.</div>`;
+  } else if (f.notAttempted) {
+    financeBlock = `<div class="muted">• Finance sync: <strong>not attempted</strong> — ${escapeHtml(reasonText(f.reason))}.</div>`;
+  } else if (f.error) {
+    financeBlock = `<div class="err">• Finance sync failed — ${escapeHtml(f.error)}.</div>`;
+  } else {
+    const c = f.counts || {};
+    const cls = (c.failed > 0) ? 'err' : 'muted';
+    financeBlock =
+      `<div class="${cls}">• Finance sync — considered ${c.considered ?? 0}: `
+      + `<strong>sent ${c.sent ?? 0}</strong>, already sent ${c.alreadySent ?? 0}, `
+      + `skipped ${c.skipped ?? 0}, failed ${c.failed ?? 0}.</div>`
+      + (f.reportPath
+          ? `<div class="muted">&nbsp;&nbsp;Audit report: <code>${escapeHtml(f.reportPath)}</code> — use “Open Last Report”.</div>`
+          : '');
   }
 
-  setLastRunSummary(head + rows + financeRow);
+  setLastRunSummary(head + localBlock + rows + financeBlock);
 }
 
-async function runFetch(mode) {
-  if (fetchRunning) { log('A fetch is already running — please wait for it to finish.'); return; }
+async function runFetch(mode, financeMode = 'fetch-only') {
+  if (fetchRunning) { log('A run is already in progress — please wait for it to finish.'); return; }
 
   const dv = validateDaysBack($('days-back').value);
   showDaysBackError(dv.valid ? '' : dv.error);
-  if (!dv.valid) { log(`Fetch blocked — ${dv.error}.`); return; }
+  if (!dv.valid) { log(`Run blocked — ${dv.error}.`); return; }
 
+  const isSync = financeMode === 'sync';
+  const scope  = mode === 'default' ? 'default account' : 'all accounts';
   setFetchRunning(true);
-  setStatus('Fetching…', false);
-  log(`${mode === 'default' ? 'Fetch default account' : 'Fetch all accounts'} started (days back ${dv.value})…`);
+  setStatus(isSync ? 'Syncing…' : 'Fetching…', false);
+  log(`${isSync ? 'Sync to Finance' : 'Fetch Only'} (${scope}) started (days back ${dv.value})…`);
   try {
-    const res = await window.bridge.runFetch({ mode, daysBack: dv.value });
+    const res = await window.bridge.runFetch({ mode, financeMode, daysBack: dv.value });
     if (!res || !res.ok) {
-      log(`Fetch error: ${res?.error || 'unknown error'}`);
-      setLastRunSummary(`<span class="err">${escapeHtml(res?.error || 'Fetch failed')}</span>`);
+      log(`Run error: ${res?.error || 'unknown error'}`);
+      setLastRunSummary(`<span class="err">${escapeHtml(res?.error || 'Run failed')}</span>`);
       return;
     }
+    // Remember the audit report so "Open Last Report" can reveal it.
+    if (res.finance && res.finance.reportPath) {
+      lastReportPath = res.finance.reportPath;
+    }
     renderRunSummary(res);
+
+    const f = res.finance || {};
+    let financeMsg = '';
+    if (isSync && f.counts) {
+      financeMsg = ` Finance: sent ${f.counts.sent}, already sent ${f.counts.alreadySent}, `
+        + `skipped ${f.counts.skipped}, failed ${f.counts.failed}.`;
+    } else if (isSync && f.notAttempted) {
+      financeMsg = ` Finance not attempted (${reasonText(f.reason)}).`;
+    }
     log(`Run complete — ${res.summary?.succeeded ?? 0} ok, ${res.summary?.failed ?? 0} failed, `
-      + `${res.summary?.totalTransactionsExported ?? 0} transaction(s) exported.`);
+      + `${res.summary?.totalTransactionsExported ?? 0} saved locally.${financeMsg}`);
   } catch (err) {
-    log(`Fetch failed: ${err.message}`);
+    log(`Run failed: ${err.message}`);
     setLastRunSummary(`<span class="err">${escapeHtml(err.message)}</span>`);
   } finally {
     setFetchRunning(false);
     setStatus('Ready', true);
   }
+}
+
+async function onOpenReport() {
+  if (!lastReportPath) { log('No finance report yet — run a Sync to Finance first.'); return; }
+  try {
+    const res = await window.bridge.revealReport(lastReportPath);
+    if (!res || !res.ok) log(`Could not open report: ${res?.error || 'unknown error'}`);
+  } catch (err) { log(`Could not open report: ${err.message}`); }
 }
 
 // ── Wiring + boot ────────────────────────────────────────────────────────────────
@@ -533,6 +645,12 @@ function wire() {
   $('btn-finance-save').addEventListener('click', onSaveFinanceSecret);
   $('btn-finance-delete').addEventListener('click', onDeleteFinanceSecret);
   $('btn-finance-test').addEventListener('click', onTestFinanceConnection);
+  $('btn-sync-all').addEventListener('click', () => runFetch('all', 'sync'));
+  $('btn-sync-default').addEventListener('click', () => runFetch('default', 'sync'));
+  $('btn-open-report').addEventListener('click', onOpenReport);
+  // Keep the Sync buttons' enabled state in sync with the finance config inputs.
+  $('finance-enabled').addEventListener('change', updateSyncAvailability);
+  $('finance-url').addEventListener('input', updateSyncAvailability);
   $('days-back').addEventListener('input', () => {
     const dv = validateDaysBack($('days-back').value);
     showDaysBackError(dv.valid ? '' : dv.error);

@@ -13,7 +13,11 @@ contextBridge.exposeInMainWorld('bridge', {
   getSettings:  () => ipcRenderer.invoke('settings:get'),
   /** Persist settings (validated + sanitized in main). Returns { ok } or { ok:false, error }. */
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
-  /** Run the real fetch. payload: { mode:'all'|'default', daysBack }. Resolves to the final summary. */
+  /**
+   * Run the real fetch. payload: { mode:'all'|'default', financeMode:'fetch-only'|'sync', daysBack }.
+   * 'fetch-only' fetches + saves locally and never calls finance; 'sync' also runs
+   * the ledger-aware finance sync. Resolves to the final summary.
+   */
   runFetch:     (payload) => ipcRenderer.invoke('fetch:run', payload),
   /**
    * Subscribe to secret-free fetch progress events (account-start/login/fetched/
@@ -42,4 +46,6 @@ contextBridge.exposeInMainWorld('bridge', {
   deleteFinanceSecret: (credentialKey) => ipcRenderer.invoke('finance:deleteSecret', credentialKey),
   /** Test the finance connection. payload: { apiUrl, credentialKey }. Returns { ok, message }. */
   testFinanceConnection: (payload) => ipcRenderer.invoke('finance:test', payload),
+  /** Reveal a finance sync audit report file in the OS file manager. */
+  revealReport: (filePath) => ipcRenderer.invoke('finance:revealReport', filePath),
 });

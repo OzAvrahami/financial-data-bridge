@@ -44,12 +44,43 @@ Not saved** status — never the saved secret. Saving overwrites; deleting prune
 **Limitation:** the encrypted file is decryptable only by the same OS user on the
 same machine; moved elsewhere, secrets must be re-entered.
 
-**Financial System Integration:** enable/disable finance export, set the API
+**Financial System Integration:** enable/disable the integration, set the API
 URL/endpoint, save/replace/delete the API key, and run **Test Connection** — all
-from the desktop UI. When enabled, finance export runs automatically after each
-fetch, sending qualifying transactions in memory (the key never touches disk in
-plaintext). When disabled, fetching CAL transactions works without contacting the
-finance API. Configuration comes entirely from the UI — **not** from `.env`.
+from the desktop UI. Configuration comes entirely from the UI — **not** from `.env`.
+
+**Two explicit run modes (finance is never sent implicitly):**
+
+- **Fetch Only** (the **Fetch All / Fetch Default** buttons): fetch from CAL,
+  deduplicate, and write the local export. The finance API is **never contacted**;
+  every transaction's finance status for the run is `not_attempted` with reason
+  `run_mode_fetch_only`.
+- **Sync to Finance** (the **Sync All / Sync Default** buttons, in the Financial
+  System Integration card): fetch, save locally, **then** run the ledger-aware
+  finance sync. These buttons stay disabled until the integration is enabled and
+  both the API URL and API key are saved. The API key is held in memory only (it
+  never touches disk in plaintext).
+
+**Finance sync is decoupled from local dedup.** Local `new/updated/unchanged`
+status answers "did the local export change?", **not** "did finance accept it?".
+The sync engine therefore evaluates **every** considered transaction against a
+dedicated **finance sync ledger** (see §5), so:
+
+- an unchanged-locally transaction that was never sent to finance is still sent;
+- a transaction that failed a prior finance send is retried;
+- a transaction with a prior successful send is `already_sent` (not resent);
+- an already-sent transaction whose local content later changed is **flagged for
+  review** (`already_sent_content_changed`) rather than resent, because the finance
+  API's idempotency is unverified and resending could create a duplicate.
+
+**Idempotency:** each send includes `external_id` = the transaction `dedupKey`, so
+the finance system *could* dedupe on it, but the app does **not** rely on that. The
+local finance sync ledger is the authoritative "already sent" record; only
+transactions without a prior successful-send record are sent.
+
+**Audit report:** every Sync to Finance run writes a per-transaction report (JSON +
+CSV) to `runtime/reports/finance-sync-<runId>.{json,csv}`, with one row per
+considered transaction (`localDedupStatus`, `financeStatus`, `reason`, `apiStatus`,
+`financeTransactionId`, `dedupKey`, …). Use **Open Last Report** to reveal it.
 
 ## 5. Runtime state (`runtime/`)
 
@@ -61,6 +92,8 @@ Local, gitignored state created on demand under `runtime/`:
 | `runtime/sessions/` | Saved Playwright login state per provider/account. | `SessionStore` |
 | `runtime/checkpoints/` | Mid-run checkpoints for resume. | `CheckpointStore` |
 | `runtime/exports/` | Exported transaction JSON. | `exporter.js` |
+| `runtime/finance-ledger/` | Per-transaction finance sync state (was it accepted by finance?), one file per provider+account. Authoritative "already sent" record, independent of `seen/`. | `FinanceLedger` |
+| `runtime/reports/` | Per-run finance sync audit reports (JSON + CSV). | `financeReport.js` |
 
 Defaults come from `packages/bridge-core/src/config.js`. The folder is kept in
 git via `runtime/.gitkeep`; its contents are ignored.
@@ -72,10 +105,12 @@ git via `runtime/.gitkeep`; its contents are ignored.
   (safeStorage credential store).
 - **`packages/bridge-core/src`** — the engine:
   - `application/` — use cases: `fetchTransactions`, `fetchAllAccounts`,
-    `runFinanceExport`, `exportToFinanceSystem`.
+    `runFinanceExport`, `exportToFinanceSystem`, `syncTransactionsToFinance`
+    (the ledger-aware finance sync engine).
   - `config/` — `config.js`, `sourceAccounts.js`, `appSettings.js`.
   - `providers/cal/` — CAL provider (auth, navigator, extractor, normalizer).
-  - `infrastructure/` — dedup, stores, retry, metrics, logger.
+  - `infrastructure/` — dedup, stores (incl. `FinanceLedger`), `financeReport`,
+    retry, metrics, logger.
   - `schema/` — transaction + run-report models.
 
 No business logic lives in entry points — the desktop and tests all call the
@@ -83,8 +118,20 @@ No business logic lives in entry points — the desktop and tests all call the
 
 ## 7. Engine notes
 
+- **Fetch scope — `daysBack` is authoritative.** The entire requested date range
+  is always scanned end to end; the seen/dedup state decides only whether a
+  transaction is *exported*, never whether scanning continues. There is no
+  consecutive-unchanged "early stop". Increasing `daysBack` re-inspects the larger
+  window, so previously missed, newly finalized (previously pending), or modified
+  transactions anywhere inside it are discovered. Normalization, pending filtering,
+  dedup, and export decisions are applied only after the full range is read.
 - **Dedup identity** is occurrence-aware: `assignOccurrenceKeys()` assigns each
   transaction a `dedupKey`, reused as the finance system's `external_id`.
+- **Local dedup vs finance sync are separate concerns.** `fetchTransactions`
+  returns both `transactions` (the local-export set: created + updated) and
+  `consideredTransactions` (every transaction inspected, each tagged with
+  `localDedupStatus`). Finance sync consumes the latter and decides what to send
+  using the `FinanceLedger`, never the local dedup status.
 - **Multi-account scoping:** session/seen/checkpoint state and exports are keyed
   by `provider` + `providerAccountId`, so accounts never collide.
 - **Pending/unfinalized transactions are skipped at extraction** and reported

@@ -18,7 +18,6 @@ const state = {
   totalPendingSkipped: 0,
   // Phase 4
   resumedRuns: 0,
-  earlyStops: 0,
   totalDuplicatesSkipped: 0,
   totalUnchanged: 0,
   totalUpdated: 0,
@@ -50,7 +49,6 @@ export const metrics = {
 
     // Phase 4
     if (report.resumed)              state.resumedRuns++;
-    if (report.earlyStopTriggered)   state.earlyStops++;
     if (report.checkpointUsed)       state.checkpointRecoveries++;
     state.totalDuplicatesSkipped += report.duplicatesSkipped ?? 0;
     state.totalUnchanged         += report.unchangedCount   ?? 0;
@@ -75,7 +73,6 @@ export const metrics = {
       totalTransactionsSkipped: 0,
       totalPendingSkipped: 0,
       resumedRuns: 0,
-      earlyStops: 0,
       totalDuplicatesSkipped: 0,
       totalUnchanged: 0,
       totalUpdated: 0,

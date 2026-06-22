@@ -15,7 +15,7 @@
  * events back to the renderer. Only one run may execute at a time.
  */
 
-const { app, BrowserWindow, ipcMain, Menu, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, safeStorage, shell } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { getDefaultStore } = require('./credentialStore.cjs');
@@ -54,12 +54,17 @@ function engine() {
   return _enginePromise;
 }
 
-// Finance export/test helpers — a lighter module than the full engine (no
-// Playwright), imported lazily only when finance actions are used.
+// Finance sync/test helpers — lighter modules than the full engine (no Playwright),
+// imported lazily only when finance actions are used. Merges the connectivity-test
+// helper (runFinanceExport.js) with the ledger-aware sync engine.
 let _financePromise = null;
 function financeApi() {
   if (!_financePromise) {
-    _financePromise = import(pathToFileURL(path.join(CORE_SRC, 'application/runFinanceExport.js')).href);
+    const imp = (rel) => import(pathToFileURL(path.join(CORE_SRC, rel)).href);
+    _financePromise = Promise.all([
+      imp('application/runFinanceExport.js'),
+      imp('application/syncTransactionsToFinance.js'),
+    ]).then(([rfe, sync]) => ({ ...rfe, ...sync }));
   }
   return _financePromise;
 }
@@ -229,6 +234,18 @@ ipcMain.handle('finance:test', async (_event, payload = {}) => {
   }
 });
 
+// Reveal a finance sync audit report in the OS file manager. Read-only: it only
+// opens the folder containing the (non-secret) report file the app just wrote.
+ipcMain.handle('finance:revealReport', (_event, filePath) => {
+  try {
+    if (!filePath) return { ok: false, error: 'No report file to open.' };
+    shell.showItemInFolder(path.resolve(filePath));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // Real fetch. Decrypts credentials in-process, drives the bridge-core engine,
 // and streams secret-free progress events to the renderer. Single-flight.
 ipcMain.handle('fetch:run', async (event, payload = {}) => {
@@ -241,15 +258,24 @@ ipcMain.handle('fetch:run', async (event, payload = {}) => {
       const { fetchAllAccounts } = await engine();
       const settings = c.loadAppSettings({ configPath: settingsPath(c.config), config: c.config });
 
+      // Run mode: 'sync' fetches AND syncs to finance; anything else is Fetch Only
+      // (fetch + local save, finance never called). The renderer's Fetch buttons
+      // send fetch-only; the Sync buttons send 'sync'.
+      const financeMode = payload.financeMode === 'sync' ? 'sync' : 'fetch-only';
+
       // Assemble in-memory finance config: non-secret URL/flag from settings, the
-      // API key decrypted from the OS-secure store. Only resolve when enabled.
+      // API key decrypted from the OS-secure store. The key is only resolved when
+      // finance is enabled; the sync engine self-gates (and still writes an audit
+      // report) when disabled or when the URL/key is missing.
       const fin = settings.finance || {};
       const financeConfig = { enabled: fin.enabled === true, apiUrl: fin.apiUrl || '', apiKey: '' };
-      let runFinanceExport;
-      if (financeConfig.enabled) {
-        try { financeConfig.apiKey = getDefaultStore().getSecret(fin.credentialKey) || ''; }
-        catch { financeConfig.apiKey = ''; }
-        ({ runFinanceExport } = await financeApi());
+      let syncTransactionsToFinance;
+      if (financeMode === 'sync') {
+        if (financeConfig.enabled) {
+          try { financeConfig.apiKey = getDefaultStore().getSecret(fin.credentialKey) || ''; }
+          catch { financeConfig.apiKey = ''; }
+        }
+        ({ syncTransactionsToFinance } = await financeApi());
       }
 
       const apiKeyForScrub = financeConfig.apiKey;
@@ -264,6 +290,7 @@ ipcMain.handle('fetch:run', async (event, payload = {}) => {
 
       const out = await runDesktopFetch({
         mode:               payload.mode === 'default' ? 'default' : 'all',
+        financeMode,
         daysBack:           payload.daysBack,
         settings,
         credentialStore:    getDefaultStore(),
@@ -273,8 +300,14 @@ ipcMain.handle('fetch:run', async (event, payload = {}) => {
         validateDaysBack:   c.validateDaysBack,
         onEvent,
         financeConfig,
-        runFinanceExport,
+        syncTransactionsToFinance,
       });
+
+      // Resolve the audit report paths to absolute so the renderer's "open report"
+      // action can reveal them regardless of the process working directory.
+      if (out?.finance?.reportPath)    out.finance.reportPath    = path.resolve(out.finance.reportPath);
+      if (out?.finance?.reportCsvPath) out.finance.reportCsvPath = path.resolve(out.finance.reportCsvPath);
+
       return scrubSecretFrom(out, apiKeyForScrub); // defense-in-depth on the final payload
     });
   } catch (err) {

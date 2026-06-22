@@ -118,8 +118,8 @@ export function classifyTransaction(store, fp, ch, fullFetch = false) {
 /**
  * Persists per-transaction seen state (dedupKey → contentHash) per provider+account.
  *
- * Used to classify transactions as created/updated/unchanged and to drive
- * incremental early-stop on consecutive unchanged transactions.
+ * Used to classify transactions as created/updated/unchanged. This decides only
+ * whether a transaction is exported — never whether scanning continues.
  *
  * One file per provider+account: {dir}/{provider}[_{accountId}].json
  *

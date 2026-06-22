@@ -15,9 +15,10 @@
  *     },
  *   });
  *
- * Phase 4: fetchTransactions now accepts { daysBack, startIndex, onProgress }.
- * The fake calls onProgress for each transaction (mirroring CalProvider) so that
- * checkpoint and early-stop integration tests work correctly.
+ * fetchTransactions accepts { daysBack, startIndex, onProgress }. The fake calls
+ * onProgress for each transaction (mirroring CalProvider) so checkpoint tests
+ * work. onProgress is checkpoint-only and never stops the scan — every row in the
+ * (sliced-from-startIndex) set is always processed.
  */
 export function createFakeProvider(opts = {}) {
   let _loginCallCount = 0;
@@ -66,13 +67,13 @@ export function createFakeProvider(opts = {}) {
         const tx = toProcess[i];
         outputTransactions.push(tx);
 
+        // Checkpoint-only callback; its return value is ignored (no early-stop).
         if (onProgress) {
-          const shouldContinue = await onProgress({
+          await onProgress({
             index:       startIndex + i,
             total:       allTransactions.length,
             transaction: tx,
           });
-          if (shouldContinue === false) break;
         }
       }
 

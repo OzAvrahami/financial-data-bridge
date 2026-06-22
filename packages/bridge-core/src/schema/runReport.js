@@ -30,8 +30,6 @@
  * @property {number}   unchangedCount            - transactions skipped (identical to previous run)
  * @property {number}   newTransactionsExported   - createdCount + updatedCount (total emitted)
  * @property {number}   duplicatesSkipped         - within-run duplicate dedupKeys
- * @property {boolean}  earlyStopTriggered
- * @property {string|null} earlyStopReason
  */
 
 export function createRunReport({ provider, accountId = 'default', providerAccountId, displayName = '' } = {}) {
@@ -65,8 +63,6 @@ export function createRunReport({ provider, accountId = 'default', providerAccou
     unchangedCount: 0,
     newTransactionsExported: 0,
     duplicatesSkipped: 0,
-    earlyStopTriggered: false,
-    earlyStopReason: null,
   };
 }
 

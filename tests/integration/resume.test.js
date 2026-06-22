@@ -1,6 +1,6 @@
 /**
  * Integration tests for Phase 4 — checkpointing, resume, deduplication,
- * and incremental fetch behavior.
+ * and full-range scanning (the entire requested window is always inspected).
  *
  * All tests use injected fakes; no browser or filesystem access.
  */
@@ -240,10 +240,12 @@ describe('deduplication — unchanged transactions', () => {
   });
 });
 
-// ── Incremental early stop ────────────────────────────────────────────────────
+// ── Full-range scan (no early stop) ─────────────────────────────────────────────
+//
+// The seen/dedup state decides only whether a transaction is exported — never
+// whether scanning continues. The entire requested range is always inspected.
 
-describe('incremental early stop', () => {
-  // Build 5 transactions: first 2 are new, last 3 are already-seen
+describe('full-range scan — no early stop', () => {
   const tx = (n) => createTransaction({
     provider: 'CAL', accountId: 'Visa 1234',
     transactionDate: `2026-04-${String(n).padStart(2, '0')}`,
@@ -253,72 +255,55 @@ describe('incremental early stop', () => {
     transactionType: 'רגיל',
   });
 
-  const txList = [tx(5), tx(4), tx(3), tx(2), tx(1)]; // newest-first
-
-  it('stops early when earlyStopThreshold consecutive unchanged transactions reached', async () => {
-    // Seed tx(3), tx(2), tx(1) as unchanged (legacy null-hash entries)
-    const seenFps = [tx(3), tx(2), tx(1)].map(fingerprint);
+  it('inspects every row even when all rows are already seen (unchanged)', async () => {
+    const txList = [tx(5), tx(4), tx(3), tx(2), tx(1)];
     const deps = makeDeps({
       providerOpts: { fetchResult: { transactions: txList, warnings: [] } },
-      seenFingerprints: seenFps,
+      seenFingerprints: txList.map(fingerprint), // all already seen
     });
 
-    const { report } = await fetchTransactions(
-      {
-        credentials: TEST_CREDS,
-        skipExport: true,
-        incremental: true,
-        earlyStopThreshold: 3,
-      },
-      deps
-    );
+    const { report } = await fetchTransactions({ credentials: TEST_CREDS, skipExport: true }, deps);
 
-    assert.equal(report.earlyStopTriggered, true, 'early stop should be triggered');
-    assert.ok(report.earlyStopReason?.includes('unchanged'), 'earlyStopReason should mention unchanged');
-  });
-
-  it('does not stop early when incremental: false', async () => {
-    const seenFps = [tx(3), tx(2), tx(1)].map(fingerprint);
-    const deps = makeDeps({
-      providerOpts: { fetchResult: { transactions: txList, warnings: [] } },
-      seenFingerprints: seenFps,
-    });
-
-    const { report } = await fetchTransactions(
-      {
-        credentials: TEST_CREDS,
-        skipExport: true,
-        incremental: false,
-      },
-      deps
-    );
-
-    assert.equal(report.earlyStopTriggered, false, 'early stop should NOT trigger');
-    // All 5 transactions considered (even if 3 are already-seen)
+    // Provider returned/processed every row; nothing stopped the scan.
+    assert.equal(report.transactionsFetched, txList.length);
     assert.equal(report.totalTransactionsConsidered, txList.length);
+    assert.equal(report.unchangedCount, txList.length);
+    assert.equal(report.createdCount, 0);
   });
 
-  it('consecutive counter resets when a new transaction is encountered', async () => {
-    // Interleaved: new, seen, seen, new, seen — threshold=3 should NOT trigger
-    const seenFps = [fingerprint(tx(4)), fingerprint(tx(3)), fingerprint(tx(1))];
-    const mixedList = [tx(5), tx(4), tx(3), tx(2), tx(1)];
-    //                 new    seen   seen   new    seen   ← consecutive max is 2 (after tx(2) resets)
+  it('discovers a new transaction at the END of a long already-seen streak', async () => {
+    // 10 rows; seed the first 9 as already-seen, leave the 10th (oldest) new.
+    // With the old threshold=3 early-stop this would have stopped after 3 unchanged
+    // and never reached the new row. Now it must be discovered and exported.
+    const txList = [tx(10), tx(9), tx(8), tx(7), tx(6), tx(5), tx(4), tx(3), tx(2), tx(1)];
+    const seenFps = txList.slice(0, 9).map(fingerprint); // first 9 unchanged
     const deps = makeDeps({
-      providerOpts: { fetchResult: { transactions: mixedList, warnings: [] } },
+      providerOpts: { fetchResult: { transactions: txList, warnings: [] } },
       seenFingerprints: seenFps,
     });
 
-    const { report } = await fetchTransactions(
-      {
-        credentials: TEST_CREDS,
-        skipExport: true,
-        incremental: true,
-        earlyStopThreshold: 3,
-      },
+    const { transactions, report } = await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true },
       deps
     );
 
-    assert.equal(report.earlyStopTriggered, false, 'should not stop — consecutive never hit 3');
+    assert.equal(report.totalTransactionsConsidered, txList.length, 'whole window scanned');
+    assert.equal(report.unchangedCount, 9);
+    assert.equal(report.createdCount, 1, 'the trailing new row was discovered');
+    assert.equal(transactions.length, 1);
+    assert.equal(transactions[0].merchantName, 'Shop 1');
+  });
+
+  it('ignores any value returned by the provider onProgress callback (cannot stop the scan)', async () => {
+    // Even if a provider's onProgress were to return false, the application no
+    // longer breaks: it processes the full set. The fake mirrors this contract.
+    const txList = [tx(3), tx(2), tx(1)];
+    const deps = makeDeps({
+      providerOpts: { fetchResult: { transactions: txList, warnings: [] } },
+    });
+
+    const { report } = await fetchTransactions({ credentials: TEST_CREDS, skipExport: true }, deps);
+    assert.equal(report.transactionsFetched, txList.length);
   });
 });
 
@@ -343,13 +328,10 @@ describe('run report — Phase 4 fields', () => {
     assert.equal(typeof report.duplicatesSkipped, 'number');
     assert.equal(typeof report.newTransactionsExported, 'number');
     assert.equal(typeof report.totalTransactionsConsidered, 'number');
-    assert.equal(typeof report.earlyStopTriggered, 'boolean');
 
     assert.equal(report.resumed, false);
     assert.equal(report.checkpointUsed, false);
     assert.equal(report.checkpointPath, null);
-    assert.equal(report.earlyStopTriggered, false);
-    assert.equal(report.earlyStopReason, null);
     // Fresh run: everything is new
     assert.equal(report.createdCount, sampleTransactions.length);
     assert.equal(report.updatedCount, 0);
@@ -434,8 +416,9 @@ describe('update-aware deduplication', () => {
     assert.equal(transactions.length, 1, 'updated transaction must be emitted');
   });
 
-  it('updated transaction resets the consecutive-unchanged counter (early stop does not fire)', async () => {
-    // 8 unchanged + 1 updated + 1 new = max consecutive unchanged streak is 8, below threshold=10
+  it('classifies a mixed window correctly across the full scan (8 unchanged, 1 updated, 1 new)', async () => {
+    // The whole 10-row window is scanned; an updated row in the middle and a new
+    // row at the end are both discovered (no early-stop ever skips them).
     const txs = Array.from({ length: 10 }, (_, i) => createTransaction({
       provider: 'CAL', accountId: 'Visa 1234',
       transactionDate: `2026-05-${String(i + 1).padStart(2, '0')}`,
@@ -447,48 +430,22 @@ describe('update-aware deduplication', () => {
       providerOpts: { fetchResult: { transactions: txs, warnings: [] } },
     });
 
-    // txs[0..7]: seed with matching contentHash → unchanged (8 consecutive)
+    // txs[0..7]: seed with matching contentHash → unchanged
     for (const tx of txs.slice(0, 8)) {
       deps.seenStore.upsert(fingerprint(tx), contentHash(tx));
     }
-    // txs[8]: seed with stale hash → updated (resets counter)
+    // txs[8]: seed with stale hash → updated
     deps.seenStore.upsert(fingerprint(txs[8]), 'stale-hash-00000000');
     // txs[9]: not seen → created
 
     const { report } = await fetchTransactions(
-      { credentials: TEST_CREDS, skipExport: true, incremental: true, earlyStopThreshold: 10 },
+      { credentials: TEST_CREDS, skipExport: true },
       deps
     );
 
-    assert.equal(report.earlyStopTriggered, false, 'updated tx should reset counter and prevent early stop');
+    assert.equal(report.totalTransactionsConsidered, 10, 'entire window scanned');
     assert.equal(report.unchangedCount, 8);
     assert.equal(report.updatedCount, 1);
     assert.equal(report.createdCount, 1);
-  });
-
-  it('early stop triggers after consecutive unchanged threshold is reached', async () => {
-    const txs = Array.from({ length: 12 }, (_, i) => createTransaction({
-      provider: 'CAL', accountId: 'Visa 1234',
-      transactionDate: `2026-05-${String(i + 1).padStart(2, '0')}`,
-      merchantName: `Shop ${i}`, amount: i + 1, currency: 'ILS', transactionType: 'רגיל',
-      status: 'completed', chargeDate: '2026-05-31', chargeAmount: i + 1, chargeCurrency: 'ILS', category: '',
-    }));
-
-    const deps = makeDeps({
-      providerOpts: { fetchResult: { transactions: txs, warnings: [] } },
-    });
-
-    // All 12 seeded with matching contentHash → all unchanged
-    for (const tx of txs) {
-      deps.seenStore.upsert(fingerprint(tx), contentHash(tx));
-    }
-
-    const { report } = await fetchTransactions(
-      { credentials: TEST_CREDS, skipExport: true, incremental: true, earlyStopThreshold: 10 },
-      deps
-    );
-
-    assert.equal(report.earlyStopTriggered, true, 'should stop after 10 consecutive unchanged');
-    assert.ok(report.earlyStopReason?.includes('unchanged'), 'reason should mention unchanged');
   });
 });

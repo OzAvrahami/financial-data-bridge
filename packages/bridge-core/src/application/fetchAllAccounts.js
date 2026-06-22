@@ -28,8 +28,6 @@ import { logger } from '../infrastructure/logger.js';
  * @param {boolean}  [opts.fullFetch]
  * @param {boolean}  [opts.skipExport]
  * @param {object}   [opts.fetchConfig]
- * @param {boolean}  [opts.incremental]
- * @param {number}   [opts.earlyStopThreshold]
  *
  * @param {object|function} [_deps] - test seam forwarded to fetchTransactions.
  *        May be a single deps bundle (shared) or a function (account) => deps
@@ -37,9 +35,12 @@ import { logger } from '../infrastructure/logger.js';
  *
  * @returns {Promise<{
  *   accounts: Array<{ provider, providerAccountId, displayName, status,
- *                     transactionsExported, filePath, transactions, report, error }>,
+ *                     transactionsExported, filePath, transactions,
+ *                     consideredTransactions, report, error }>,
  *   transactions: object[],
- *   summary: { totalAccounts, succeeded, failed, totalTransactionsExported }
+ *   consideredTransactions: object[],
+ *   summary: { totalAccounts, succeeded, failed, totalTransactionsExported,
+ *              totalTransactionsConsidered }
  * }>}
  */
 export async function fetchAllAccounts(opts = {}, _deps = {}) {
@@ -51,7 +52,7 @@ export async function fetchAllAccounts(opts = {}, _deps = {}) {
   // call keeps fetchTransactions' own defaults otherwise. `fetchConfig` is handled
   // separately below so per-account daysBack can override the global value.
   const passthrough = {};
-  for (const key of ['resume', 'fullFetch', 'skipExport', 'incremental', 'earlyStopThreshold']) {
+  for (const key of ['resume', 'fullFetch', 'skipExport']) {
     if (opts[key] !== undefined) passthrough[key] = opts[key];
   }
 
@@ -71,6 +72,9 @@ export async function fetchAllAccounts(opts = {}, _deps = {}) {
 
   const accountResults  = [];
   const allTransactions = [];
+  // Full set of considered transactions (every status) across all successful
+  // accounts — the input the finance sync engine evaluates against its ledger.
+  const allConsidered   = [];
 
   logger.info('Multi-account fetch starting', { accounts: accounts.length });
 
@@ -116,10 +120,12 @@ export async function fetchAllAccounts(opts = {}, _deps = {}) {
         transactionsExported: result.transactions.length,
         filePath:             result.filePath,
         transactions:         result.transactions,
+        consideredTransactions: result.consideredTransactions ?? [],
         report:               result.report,
         error:                null,
       });
       allTransactions.push(...result.transactions);
+      allConsidered.push(...(result.consideredTransactions ?? []));
 
       emit({
         type:              'account-done',
@@ -143,6 +149,7 @@ export async function fetchAllAccounts(opts = {}, _deps = {}) {
         transactionsExported: 0,
         filePath:             null,
         transactions:         [],
+        consideredTransactions: [],
         report:               null,
         error:                err.message,
       });
@@ -163,11 +170,13 @@ export async function fetchAllAccounts(opts = {}, _deps = {}) {
   return {
     accounts:     accountResults,
     transactions: allTransactions,
+    consideredTransactions: allConsidered,
     summary: {
       totalAccounts:             accounts.length,
       succeeded,
       failed,
       totalTransactionsExported: allTransactions.length,
+      totalTransactionsConsidered: allConsidered.length,
     },
   };
 }

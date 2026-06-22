@@ -55,9 +55,11 @@ export class CalProvider extends BaseProvider {
    * @param {object}   opts
    * @param {number}   [opts.daysBack=4]
    * @param {number}   [opts.startIndex=0]    - Row index to resume from (for checkpoint resume)
-   * @param {Function} [opts.onProgress]      - Called after each extracted transaction.
-   *                                            Signature: ({ index, total, transaction }) → Promise<boolean>
-   *                                            Return false to stop the loop early.
+   * @param {Function} [opts.onProgress]      - Called after each extracted transaction,
+   *                                            for checkpointing only. Signature:
+   *                                            ({ index, total, transaction }) → Promise<void>.
+   *                                            It CANNOT stop the scan — every row in the
+   *                                            requested date range is always processed.
    * @returns {Promise<{ transactions: Transaction[], warnings: string[], pendingSkipped: number }>}
    */
   async fetchTransactions({ daysBack = 4, startIndex = 0, onProgress } = {}) {
@@ -114,9 +116,9 @@ export class CalProvider extends BaseProvider {
           const normalized = normalizeTransaction(raw);
           transactions.push(normalized);
 
+          // Checkpoint only — never stops the scan; the full range is always read.
           if (onProgress) {
-            const shouldContinue = await onProgress({ index: i, total: count, transaction: normalized });
-            if (shouldContinue === false) break;
+            await onProgress({ index: i, total: count, transaction: normalized });
           }
         }
       } catch (err) {

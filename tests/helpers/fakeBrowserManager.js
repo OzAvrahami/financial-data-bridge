@@ -9,6 +9,7 @@ export class FakeBrowserManager {
     this.launchOptions = null;
     this.launchStorageState = null;
     this._storageState = { cookies: [], origins: [] };
+    this.clearSessionCount = 0;
   }
 
   async launch(options, storageState) {
@@ -20,6 +21,11 @@ export class FakeBrowserManager {
 
   async getStorageState() {
     return this._storageState;
+  }
+
+  async clearSession() {
+    this.clearSessionCount++;
+    this._storageState = { cookies: [], origins: [] };
   }
 
   async screenshot() {}

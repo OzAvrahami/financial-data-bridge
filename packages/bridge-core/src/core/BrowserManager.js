@@ -44,6 +44,24 @@ export class BrowserManager {
     return this.context.storageState();
   }
 
+  /**
+   * Clear authentication state (cookies + best-effort web storage) so the context
+   * is logged out. Used when a restored session is expired: a fresh login must
+   * start from a clean state, otherwise stale cookies keep the site in a broken
+   * half-authenticated view and the logged-out login entry never renders.
+   */
+  async clearSession() {
+    if (!this.context) return;
+    await this.context.clearCookies().catch(() => {});
+    // localStorage/sessionStorage are per-origin; clear them for the current page
+    // if it is on a real origin (no-op/throws harmlessly on about:blank).
+    if (this.page) {
+      await this.page.evaluate(() => {
+        try { localStorage.clear(); sessionStorage.clear(); } catch { /* not on a real origin */ }
+      }).catch(() => {});
+    }
+  }
+
   async screenshot(filePath) {
     if (this.page) {
       await this.page.screenshot({ path: filePath, fullPage: true });

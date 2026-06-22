@@ -208,91 +208,148 @@ describe('fetchService — runDesktopFetch', () => {
   });
 });
 
-// ── Finance export integration ─────────────────────────────────────────────────
+// ── Finance sync (ledger-aware) integration ─────────────────────────────────────
 
-describe('fetchService — finance export', () => {
-  // Fake bridge-core runFinanceExport that records the financeConfig it received.
-  function fakeRunFinanceExport(captured = {}) {
-    return async (opts) => {
-      captured.opts = opts;
-      return { sentCount: 2, qualifyingCount: 3, skipped: 1 };
+describe('fetchService — finance sync', () => {
+  // Fake engine that returns a chosen considered set + summary, mirroring the real
+  // fetchAllAccounts contract (consideredTransactions is the full set).
+  function fakeFetchAllConsidered({ succeeded = 1, failed = 0, considered = [] }) {
+    return async () => ({
+      accounts: [],
+      transactions: [],
+      consideredTransactions: considered,
+      summary: {
+        totalAccounts: succeeded + failed, succeeded, failed,
+        totalTransactionsExported: 0, totalTransactionsConsidered: considered.length,
+      },
+    });
+  }
+
+  // Fake bridge-core sync engine that records its args and returns a chosen result.
+  function fakeSync(captured = {}, result) {
+    return async (args) => {
+      captured.args = args;
+      return result ?? {
+        runId: 'rid', executed: true, notAttemptedReason: null,
+        counts: { considered: args.consideredTransactions.length, sent: 1, alreadySent: 0, skipped: 0, failed: 0 },
+        rows: [], reportPaths: { jsonPath: 'runtime/reports/finance-sync-rid.json', csvPath: 'runtime/reports/finance-sync-rid.csv' },
+      };
     };
   }
 
-  it('does NOT attempt finance export when disabled (CAL fetch still succeeds)', async () => {
+  it('Fetch Only mode never calls the finance sync engine', async () => {
     const captured = {};
     const res = await runDesktopFetch({
-      mode: 'all', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
-      fetchAllAccounts: fakeFetchAll({}),
+      mode: 'all', financeMode: 'fetch-only', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
+      fetchAllAccounts: fakeFetchAllConsidered({ considered: [{ dedupKey: 'a' }] }),
       getDefaultAccount, getEnabledAccounts, validateDaysBack,
-      financeConfig: { enabled: false, apiUrl: 'https://x', apiKey: 'tok' },
-      runFinanceExport: fakeRunFinanceExport(captured),
+      financeConfig: { enabled: true, apiUrl: 'https://x', apiKey: 'tok' },
+      syncTransactionsToFinance: fakeSync(captured),
     });
     assert.equal(res.ok, true);
-    assert.equal(res.finance.enabled, false);
-    assert.equal(res.finance.attempted, false);
-    assert.equal(captured.opts, undefined, 'runFinanceExport must not be called when disabled');
+    assert.equal(res.financeMode, 'fetch-only');
+    assert.equal(res.finance.mode, 'fetch-only');
+    assert.equal(res.finance.notAttempted, true);
+    assert.equal(res.finance.reason, 'run_mode_fetch_only');
+    assert.equal(captured.args, undefined, 'sync engine must not run in Fetch Only mode');
   });
 
-  it('injects decrypted finance credentials into runFinanceExport when enabled', async () => {
+  it('defaults to Fetch Only when no financeMode is given', async () => {
     const captured = {};
     const res = await runDesktopFetch({
       mode: 'all', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
-      fetchAllAccounts: fakeFetchAll({}),
+      fetchAllAccounts: fakeFetchAllConsidered({ considered: [{ dedupKey: 'a' }] }),
+      getDefaultAccount, getEnabledAccounts, validateDaysBack,
+      financeConfig: { enabled: true, apiUrl: 'https://x', apiKey: 'tok' },
+      syncTransactionsToFinance: fakeSync(captured),
+    });
+    assert.equal(res.financeMode, 'fetch-only');
+    assert.equal(captured.args, undefined);
+  });
+
+  it('Sync mode passes the FULL considered set + finance config to the engine', async () => {
+    const captured = {};
+    const considered = [{ dedupKey: 'a' }, { dedupKey: 'b' }, { dedupKey: 'c' }];
+    const res = await runDesktopFetch({
+      mode: 'all', financeMode: 'sync', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
+      fetchAllAccounts: fakeFetchAllConsidered({ succeeded: 1, considered }),
       getDefaultAccount, getEnabledAccounts, validateDaysBack,
       financeConfig: { enabled: true, apiUrl: 'https://fin.example/api', apiKey: 'sk_live_X' },
-      runFinanceExport: fakeRunFinanceExport(captured),
+      syncTransactionsToFinance: fakeSync(captured),
     });
+    // The engine receives every considered tx — NOT just locally new/updated ones.
+    assert.deepEqual(captured.args.consideredTransactions, considered);
+    assert.deepEqual(captured.args.financeConfig, { enabled: true, apiUrl: 'https://fin.example/api', apiKey: 'sk_live_X' });
+    assert.equal(captured.args.fetchSucceeded, true);
     assert.equal(res.finance.ok, true);
-    assert.equal(res.finance.sent, 2);
-    assert.deepEqual(captured.opts.financeConfig, { apiUrl: 'https://fin.example/api', apiKey: 'sk_live_X' });
-    assert.equal(captured.opts.execute, true);
+    assert.equal(res.finance.counts.sent, 1);
+    assert.equal(res.finance.reportPath, 'runtime/reports/finance-sync-rid.json');
   });
 
-  it('reports a clear error (no network) when enabled but the key is missing', async () => {
-    const captured = {};
+  it('Sync mode surfaces a not_attempted result (e.g. finance disabled) from the engine', async () => {
     const res = await runDesktopFetch({
-      mode: 'all', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
-      fetchAllAccounts: fakeFetchAll({}),
+      mode: 'all', financeMode: 'sync', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
+      fetchAllAccounts: fakeFetchAllConsidered({ considered: [{ dedupKey: 'a' }] }),
       getDefaultAccount, getEnabledAccounts, validateDaysBack,
-      financeConfig: { enabled: true, apiUrl: 'https://fin.example/api', apiKey: '' },
-      runFinanceExport: fakeRunFinanceExport(captured),
+      financeConfig: { enabled: false },
+      syncTransactionsToFinance: fakeSync({}, {
+        executed: false, notAttemptedReason: 'finance_disabled',
+        counts: { considered: 1, sent: 0, alreadySent: 0, skipped: 0, failed: 0, notAttempted: 1 },
+        rows: [], reportPaths: { jsonPath: 'r.json', csvPath: 'r.csv' },
+      }),
     });
-    assert.equal(res.ok, true, 'the overall run still succeeds');
-    assert.equal(res.finance.attempted, false);
-    assert.equal(res.finance.ok, false);
-    assert.match(res.finance.error, /no API key is saved/i);
-    assert.equal(captured.opts, undefined, 'no send attempted without a key');
+    assert.equal(res.finance.notAttempted, true);
+    assert.equal(res.finance.reason, 'finance_disabled');
+    assert.notEqual(res.finance.ok, true);
   });
 
-  it('reports a finance failure without throwing, and never leaks the key', async () => {
-    const failing = async () => { throw new Error('HTTP 500 — boom'); };
+  it('Sync mode reports counts with failures as not ok (but does not throw)', async () => {
     const res = await runDesktopFetch({
-      mode: 'all', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
-      fetchAllAccounts: fakeFetchAll({}),
+      mode: 'all', financeMode: 'sync', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
+      fetchAllAccounts: fakeFetchAllConsidered({ considered: [{ dedupKey: 'a' }, { dedupKey: 'b' }] }),
       getDefaultAccount, getEnabledAccounts, validateDaysBack,
-      financeConfig: { enabled: true, apiUrl: 'https://fin.example/api', apiKey: 'sk_live_SECRET' },
-      runFinanceExport: failing,
+      financeConfig: { enabled: true, apiUrl: 'https://fin.example/api', apiKey: 'sk' },
+      syncTransactionsToFinance: fakeSync({}, {
+        executed: true, notAttemptedReason: null,
+        counts: { considered: 2, sent: 1, alreadySent: 0, skipped: 0, failed: 1 },
+        rows: [], reportPaths: { jsonPath: 'r.json', csvPath: 'r.csv' },
+      }),
     });
     assert.equal(res.ok, true);
-    assert.equal(res.finance.ok, false);
-    assert.match(res.finance.error, /HTTP 500/);
-    assert.doesNotMatch(JSON.stringify(res), /sk_live_SECRET/, 'finance key must not appear in the result');
+    assert.equal(res.finance.attempted, true);
+    assert.equal(res.finance.ok, false, 'a run with failures is not ok');
+    assert.equal(res.finance.counts.failed, 1);
   });
 
-  it('emits finance-start/finance-done progress events (secret-free)', async () => {
-    const events = [];
+  it('passes fetchSucceeded=false to the engine when no account succeeded', async () => {
+    const captured = {};
     await runDesktopFetch({
-      mode: 'all', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
-      fetchAllAccounts: fakeFetchAll({}),
+      mode: 'default', financeMode: 'sync', daysBack: 5, settings: SETTINGS,
+      credentialStore: fakeStore({ 'k-oz': { username: 'u', password: 'p' } }),
+      fetchAllAccounts: fakeFetchAllConsidered({ succeeded: 0, failed: 1, considered: [] }),
       getDefaultAccount, getEnabledAccounts, validateDaysBack,
-      onEvent: (e) => events.push(e),
-      financeConfig: { enabled: true, apiUrl: 'https://fin.example/api', apiKey: 'sk_live_SECRET' },
-      runFinanceExport: fakeRunFinanceExport({}),
+      financeConfig: { enabled: true, apiUrl: 'https://fin.example/api', apiKey: 'sk' },
+      syncTransactionsToFinance: fakeSync(captured, {
+        executed: false, notAttemptedReason: 'fetch_failed',
+        counts: { considered: 0, sent: 0, alreadySent: 0, skipped: 0, failed: 0, notAttempted: 0 },
+        rows: [], reportPaths: null,
+      }),
     });
-    assert.ok(events.some(e => e.type === 'finance-start'));
-    assert.ok(events.some(e => e.type === 'finance-done' && e.sent === 2));
-    assert.doesNotMatch(JSON.stringify(events), /sk_live_SECRET/);
+    assert.equal(captured.args.fetchSucceeded, false, 'engine decides; it is told the fetch failed');
+  });
+
+  it('reports a finance sync failure without throwing, and never leaks the key', async () => {
+    const res = await runDesktopFetch({
+      mode: 'all', financeMode: 'sync', daysBack: 5, settings: SETTINGS, credentialStore: fakeStore(),
+      fetchAllAccounts: fakeFetchAllConsidered({ considered: [{ dedupKey: 'a' }] }),
+      getDefaultAccount, getEnabledAccounts, validateDaysBack,
+      financeConfig: { enabled: true, apiUrl: 'https://fin.example/api', apiKey: 'sk_live_SECRET' },
+      syncTransactionsToFinance: async () => { throw new Error('boom'); },
+    });
+    assert.equal(res.ok, true, 'the overall run still succeeds');
+    assert.equal(res.finance.ok, false);
+    assert.match(res.finance.error, /boom/);
+    assert.doesNotMatch(JSON.stringify(res), /sk_live_SECRET/, 'finance key must not appear in the result');
   });
 });
 

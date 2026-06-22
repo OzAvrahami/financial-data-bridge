@@ -104,42 +104,77 @@ function sanitizeAccountResult(r = {}) {
 }
 
 /**
- * Run the finance export when enabled. Pure orchestration: the injected
- * `runFinanceExport` (bridge-core) does the work and already redacts its own
- * errors. Returns a secret-free status object; never throws.
+ * Run the finance SYNC step. Pure orchestration over the injected bridge-core
+ * `syncTransactionsToFinance` engine, which owns all the real logic: per-transaction
+ * ledger-aware status, retries, and the audit report. Returns a secret-free status
+ * object; never throws.
  *
- * Behavior:
- *   - disabled            → { enabled:false, attempted:false }  (CAL fetch unaffected)
- *   - enabled, no creds   → { attempted:false, ok:false, error } (clear, no network)
- *   - enabled, with creds → runs export; failure is reported, never thrown
+ * This is decoupled from local dedup: it evaluates EVERY considered transaction
+ * (not just the locally new/updated ones) so an unchanged-locally transaction that
+ * was never accepted by finance is still eligible, and a prior finance failure is
+ * retried. The engine, not this layer, decides per-transaction outcomes.
+ *
+ * Run mode:
+ *   - 'fetch-only' → finance is never touched. Every transaction's finance status
+ *     is not_attempted / run_mode_fetch_only. No ledger writes, no API calls.
+ *   - 'sync'       → run the engine. It still self-gates on enabled / URL / key /
+ *     fetchSucceeded, recording the matching not_attempted reason and writing a
+ *     report. A thrown error is reported, never propagated.
  */
-async function maybeRunFinance({ financeConfig, runFinanceExport, transactions, onEvent }) {
+async function runFinanceSync({
+  financeMode,
+  financeConfig,
+  syncTransactionsToFinance,
+  consideredTransactions,
+  fetchSucceeded,
+  onEvent,
+  ledgerDir,
+  reportsDir,
+}) {
   const emit = (e) => { try { if (typeof onEvent === 'function') onEvent(e); } catch { /* ignore */ } };
 
-  if (!financeConfig || !financeConfig.enabled) {
-    return { enabled: false, attempted: false };
-  }
-  if (!financeConfig.apiUrl || !financeConfig.apiKey) {
-    const error = !financeConfig.apiUrl
-      ? 'Finance export is enabled but the API URL is not set. Configure it in Financial System Integration.'
-      : 'Finance export is enabled but no API key is saved. Add it in Financial System Integration.';
-    emit({ type: 'finance-error', error });
-    return { enabled: true, attempted: false, ok: false, error };
+  // Fetch Only: finance is intentionally not executed.
+  if (financeMode !== 'sync') {
+    emit({ type: 'finance-not-attempted', reason: 'run_mode_fetch_only', considered: consideredTransactions.length });
+    return {
+      mode: 'fetch-only',
+      attempted: false,
+      notAttempted: true,
+      reason: 'run_mode_fetch_only',
+      considered: consideredTransactions.length,
+    };
   }
 
-  emit({ type: 'finance-start', total: transactions.length });
+  if (typeof syncTransactionsToFinance !== 'function') {
+    const error = 'Finance sync engine is unavailable.';
+    emit({ type: 'finance-error', error });
+    return { mode: 'sync', attempted: false, ok: false, error };
+  }
+
   try {
-    const r = await runFinanceExport({
-      transactions,
-      execute: true,
-      financeConfig: { apiUrl: financeConfig.apiUrl, apiKey: financeConfig.apiKey },
+    const r = await syncTransactionsToFinance({
+      consideredTransactions,
+      financeConfig: { enabled: financeConfig.enabled, apiUrl: financeConfig.apiUrl, apiKey: financeConfig.apiKey },
+      fetchSucceeded,
+      onEvent,
+      ...(ledgerDir ? { ledgerDir } : {}),
+      ...(reportsDir ? { reportsDir } : {}),
     });
-    emit({ type: 'finance-done', sent: r.sentCount, qualifying: r.qualifyingCount, skipped: r.skipped });
-    return { enabled: true, attempted: true, ok: true, sent: r.sentCount, qualifying: r.qualifyingCount, skipped: r.skipped };
+    return {
+      mode:          'sync',
+      attempted:     r.executed,
+      notAttempted:  !r.executed,
+      reason:        r.notAttemptedReason,
+      // A run is "ok" when it actually executed and nothing failed mid-send.
+      ok:            r.executed && r.counts.failed === 0,
+      counts:        r.counts,
+      reportPath:    r.reportPaths?.jsonPath ?? null,
+      reportCsvPath: r.reportPaths?.csvPath ?? null,
+    };
   } catch (err) {
-    // bridge-core has already redacted secrets/URLs from this message.
+    // bridge-core redacts secrets/URLs from its own messages.
     emit({ type: 'finance-error', error: err.message });
-    return { enabled: true, attempted: true, ok: false, error: err.message };
+    return { mode: 'sync', attempted: true, ok: false, error: err.message };
   }
 }
 
@@ -156,6 +191,7 @@ async function maybeRunFinance({ financeConfig, runFinanceExport, transactions, 
  */
 async function runDesktopFetch({
   mode,
+  financeMode,
   daysBack,
   settings,
   credentialStore,
@@ -165,12 +201,16 @@ async function runDesktopFetch({
   validateDaysBack,
   onEvent,
   financeConfig,
-  runFinanceExport,
+  syncTransactionsToFinance,
+  ledgerDir,
+  reportsDir,
 }) {
   const dv = validateDaysBack(daysBack ?? settings?.daysBack);
   if (!dv.valid) return { ok: false, error: `Invalid days back: ${dv.error}` };
 
   const normalizedMode = mode === 'default' ? 'default' : 'all';
+  // 'sync' performs the finance sync after fetching; anything else is Fetch Only.
+  const normalizedFinanceMode = financeMode === 'sync' ? 'sync' : 'fetch-only';
 
   const sel = selectAccounts({ settings, mode: normalizedMode, getDefaultAccount, getEnabledAccounts });
   if (sel.error) return { ok: false, error: sel.error };
@@ -183,18 +223,26 @@ async function runDesktopFetch({
     onEvent: typeof onEvent === 'function' ? onEvent : undefined,
   });
 
-  // Finance export only runs when enabled; a failure here never aborts the run
-  // (CAL transactions are already fetched and written to runtime/exports).
-  const finance = await maybeRunFinance({
-    financeConfig,
-    runFinanceExport,
-    transactions: result.transactions ?? [],
+  // Finance sync is a separate, ledger-aware step. It never aborts the run (CAL
+  // transactions are already fetched and written to runtime/exports). It receives
+  // the FULL considered set from successful accounts — NOT just the locally
+  // new/updated ones — so finance status is decided on its own merits.
+  const fetchSucceeded = (result.summary?.succeeded ?? 0) > 0;
+  const finance = await runFinanceSync({
+    financeMode: normalizedFinanceMode,
+    financeConfig: financeConfig ?? { enabled: false },
+    syncTransactionsToFinance,
+    consideredTransactions: result.consideredTransactions ?? [],
+    fetchSucceeded,
     onEvent,
+    ledgerDir,
+    reportsDir,
   });
 
   return {
     ok: true,
     mode: normalizedMode,
+    financeMode: normalizedFinanceMode,
     daysBack: dv.value,
     summary: result.summary,
     accounts: (result.accounts ?? []).map(sanitizeAccountResult),
@@ -208,6 +256,6 @@ module.exports = {
   selectAccounts,
   attachCredentials,
   sanitizeAccountResult,
-  maybeRunFinance,
+  runFinanceSync,
   runDesktopFetch,
 };

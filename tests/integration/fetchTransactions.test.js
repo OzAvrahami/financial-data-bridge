@@ -111,6 +111,52 @@ describe('fetchTransactions — session and auth', () => {
   });
 });
 
+// ── Session recovery (regression: expired session → clean fresh login) ─────────
+
+describe('fetchTransactions — expired-session recovery', () => {
+  it('expired saved session falls back to a fresh login from a CLEAN context', async () => {
+    const savedSession = { cookies: [{ name: 'stale', value: 'x' }], origins: [] };
+    const deps = makeDeps({
+      providerOpts: { sessionValid: false, fetchResult: { transactions: sampleTransactions, warnings: [] } },
+      sessionState: savedSession,
+    });
+
+    const { report } = await fetchTransactions({ credentials: TEST_CREDS, skipExport: true }, deps);
+
+    assert.equal(report.sessionReused, false);
+    assert.equal(deps.provider.loginCallCount, 1, 'fresh login performed');
+    assert.ok(deps.browser.clearSessionCount >= 1, 'stale auth state cleared before login');
+    assert.equal(deps.sessionStore.cleared, true, 'stale persisted session dropped');
+    assert.equal(report.status, 'success');
+  });
+
+  it('a genuinely valid saved session is reused — no clear, no login', async () => {
+    const deps = makeDeps({
+      providerOpts: { sessionValid: true, fetchResult: { transactions: sampleTransactions, warnings: [] } },
+      sessionState: { cookies: [], origins: [] },
+    });
+
+    const { report } = await fetchTransactions({ credentials: TEST_CREDS, skipExport: true }, deps);
+
+    assert.equal(report.sessionReused, true);
+    assert.equal(deps.provider.loginCallCount, 0, 'no login when session is valid');
+    assert.equal(deps.browser.clearSessionCount, 0, 'valid session is not cleared');
+  });
+
+  it('fresh-login retry starts from a clean context on every attempt', async () => {
+    const deps = makeDeps({
+      providerOpts: { sessionValid: false, loginError: new Error('boom') },
+      sessionState: { cookies: [{ name: 'stale', value: 'x' }], origins: [] },
+    });
+
+    await assert.rejects(() => fetchTransactions({ credentials: TEST_CREDS, skipExport: true }, deps));
+
+    // 2 attempts → cleared before each, so retries never reuse the broken state.
+    assert.equal(deps.provider.loginCallCount, 2, 'login attempted twice');
+    assert.equal(deps.browser.clearSessionCount, 2, 'context cleared before each attempt');
+  });
+});
+
 // ── Fetch result handling ─────────────────────────────────────────────────────
 
 describe('fetchTransactions — fetch results', () => {
@@ -488,13 +534,22 @@ describe('fetchTransactions — business-field duplicates', () => {
     // Replace the default empty FakeSeenStore with one pre-seeded with both keys.
     deps.seenStore = new (await import('../helpers/fakeSeenStore.js')).FakeSeenStore(seededStore);
 
-    const { transactions, report } = await fetchTransactions(
+    const { transactions, consideredTransactions, report } = await fetchTransactions(
       { credentials: TEST_CREDS, skipExport: true },
       deps
     );
 
     assert.equal(transactions.length, 0, 'nothing new to export');
     assert.equal(report.unchangedCount, 2, 'both classified as unchanged');
+
+    // Core fix: even though nothing is in the local export set, the full considered
+    // set is still surfaced (tagged unchanged) so finance sync can evaluate them
+    // against its own ledger rather than wrongly treating "unchanged" as "sent".
+    assert.equal(consideredTransactions.length, 2, 'both surfaced for finance sync');
+    assert.ok(
+      consideredTransactions.every(t => t.localDedupStatus === 'unchanged'),
+      'each considered tx is tagged with its local dedup status'
+    );
   });
 
   it('occurrenceIndex 1 matches a SeenStore entry written as a bare fingerprint (backward compat)', async () => {

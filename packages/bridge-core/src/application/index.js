@@ -29,8 +29,13 @@ export {
   FinanceExportInputError,
 } from './runFinanceExport.js';
 
+// Finance sync engine — ledger-aware, per-transaction audit. The Sync to Finance
+// flow uses this so finance status is tracked independently of local dedup status.
+export { syncTransactionsToFinance } from './syncTransactionsToFinance.js';
+
 // Lower-level finance helpers (kept exported for direct use / testing).
 export {
   exportToFinanceSystem,
+  sendTransactionToFinance,
   shouldSendTransaction,
 } from './exportToFinanceSystem.js';
