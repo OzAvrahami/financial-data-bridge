@@ -1,0 +1,79 @@
+# electron-builder configuration for the Financial Data Bridge desktop app.
+#
+# This is a single-package "monorepo": one root package.json, with the Electron
+# app under apps/desktop and the engine under packages/bridge-core (imported by
+# relative path, not as a workspace package). electron-builder bundles the app
+# sources listed in `files` plus the PRODUCTION dependency tree it derives from
+# package.json (devDependencies such as electron itself and electron-builder are
+# excluded automatically).
+#
+# Chromium for Playwright is NOT an npm dependency on disk — it is downloaded by
+# scripts/bundle-browsers.mjs into ./pw-browsers and shipped via extraResources.
+appId: com.ozavrahami.financialdatabridge
+productName: Financial Data Bridge
+copyright: Copyright © 2026 Oz Avrahami
+
+directories:
+  output: release
+  buildResources: build
+
+# Whitelist of app sources to pack. node_modules of production dependencies
+# (@playwright/test, dotenv, and their transitive deps) are added automatically.
+files:
+  - apps/desktop/**/*
+  - packages/bridge-core/**/*
+  - package.json
+  # ── Never package private/runtime data or dev-only files (defense in depth;
+  #    these paths are not whitelisted above, but exclude them explicitly) ──────
+  - "!**/*.test.js"
+  - "!tests/**"
+  - "!docs/**"
+  - "!scripts/**"
+  - "!runtime/**"
+  - "!pw-browsers/**"
+  - "!release/**"
+  - "!accounts.config.json"
+  - "!accounts.config.example.json"
+  - "!**/.env"
+  - "!**/.env.*"
+  - "!**/*.enc.json"
+  - "!**/credentials.enc.json"
+
+# Keep the app code in an asar archive, but unpack Playwright: it spawns the
+# browser as a child process and resolves files by real on-disk path, which does
+# not work from inside an asar.
+asar: true
+asarUnpack:
+  - "**/node_modules/playwright/**"
+  - "**/node_modules/playwright-core/**"
+  - "**/node_modules/@playwright/**"
+
+# Ship the Playwright Chromium (full browser + headless shell) alongside the app
+# so it runs on a machine that never installed Playwright. At runtime the main
+# process sets PLAYWRIGHT_BROWSERS_PATH to <resources>/pw-browsers.
+extraResources:
+  - from: pw-browsers
+    to: pw-browsers
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  shortcutName: Financial Data Bridge
+  uninstallDisplayName: Financial Data Bridge
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}

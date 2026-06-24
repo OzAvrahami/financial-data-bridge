@@ -21,6 +21,7 @@ const { pathToFileURL } = require('url');
 const { getDefaultStore } = require('./credentialStore.cjs');
 const { createFetchLock, runDesktopFetch, ConcurrentFetchError } = require('./fetchService.cjs');
 const { resolveSettingsPath } = require('./settingsPath.cjs');
+const { applyRuntimeEnv, applyBundledBrowsersPath } = require('./runtimePaths.cjs');
 
 // Only one fetch at a time — the authoritative concurrency guard.
 const fetchLock = createFetchLock();
@@ -318,7 +319,21 @@ ipcMain.handle('fetch:run', async (event, payload = {}) => {
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
+// In a PACKAGED build the installed app folder is read-only and the working
+// directory is unpredictable, so bridge-core's relative `runtime/*` defaults and
+// the global Playwright browser cache are both unusable. Before anything imports
+// bridge-core (which reads these env vars once, at import time) redirect runtime
+// state under userData and point Playwright at the Chromium bundled in resources.
+// In a dev checkout we leave the defaults alone (runtime/ in the repo, global
+// Playwright cache) so the developer workflow is unchanged.
+function configurePackagedRuntime() {
+  if (!app.isPackaged) return;
+  applyRuntimeEnv(app.getPath('userData'));
+  applyBundledBrowsersPath(process.resourcesPath);
+}
+
 app.whenReady().then(() => {
+  configurePackagedRuntime();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

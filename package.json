@@ -8,7 +8,11 @@
     "desktop": "electron apps/desktop/main.cjs",
     "test": "node tests/runner.js tests",
     "test:unit": "node tests/runner.js tests/unit",
-    "test:integration": "node tests/runner.js tests/integration"
+    "test:integration": "node tests/runner.js tests/integration",
+    "bundle:browsers": "node scripts/bundle-browsers.mjs",
+    "pack:desktop": "npm run bundle:browsers && electron-builder --dir",
+    "dist:desktop": "npm run bundle:browsers && electron-builder",
+    "dist:desktop:win": "npm run bundle:browsers && electron-builder --win nsis portable"
   },
   "keywords": [
     "electron",
@@ -27,6 +31,7 @@
     "dotenv": "^16.4.5"
   },
   "devDependencies": {
-    "electron": "^33.4.11"
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
   }
 }

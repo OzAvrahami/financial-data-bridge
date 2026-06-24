@@ -47,6 +47,15 @@ build/
 coverage/
 .nyc_output/
 
+# ── Desktop packaging (electron-builder) ─────────────────────────────────────
+# Installer/portable output and the unpacked app. Large and reproducible — never
+# commit. `release/` is the configured output dir (see electron-builder.yml).
+release/
+dist-desktop/
+# Bundled Playwright Chromium downloaded by scripts/bundle-browsers.mjs and shipped
+# via extraResources. ~550 MB, reproducible — never commit; rebuilt on demand.
+pw-browsers/
+
 # ── OS files ─────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
