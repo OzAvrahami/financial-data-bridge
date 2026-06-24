@@ -12,15 +12,24 @@ export class BrowserManager {
    * @param {object|null} storageState - Playwright storage state to restore (cookies + localStorage)
    */
   async launch(options = {}, storageState = null) {
+    const headless = options.headless ?? true;
+
+    // When running headed (e.g. CAL, which needs a visible login window) open a
+    // normal maximized window so the page has real, foreground dimensions.
+    const args = ['--no-sandbox', '--disable-dev-shm-usage'];
+    if (!headless) args.push('--start-maximized');
+
     this.browser = await chromium.launch({
-      headless: options.headless ?? true,
+      headless,
       slowMo: options.slowMo ?? 0,
-      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+      args,
     });
 
     const contextOptions = {
       locale: 'he-IL',
-      viewport: { width: 1280, height: 720 },
+      // Headed: let the page fill the real (maximized) window. Headless: keep the
+      // deterministic fixed viewport.
+      viewport: headless ? { width: 1280, height: 720 } : null,
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     };
 

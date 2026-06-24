@@ -1,6 +1,6 @@
 {
   "name": "financial-data-bridge",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Desktop app that fetches, deduplicates, and exports credit-card/bank transactions (CAL today; multi-provider by design). Electron UI on top of the bridge-core engine.",
   "main": "apps/desktop/main.cjs",
   "type": "module",

@@ -30,6 +30,7 @@ describe('resolveRuntimeEnv', () => {
     assert.equal(env.SEEN_DIR, join(root, 'seen'));
     assert.equal(env.FINANCE_LEDGER_DIR, join(root, 'finance-ledger'));
     assert.equal(env.REPORTS_DIR, join(root, 'reports'));
+    assert.equal(env.DEBUG_DIR, join(root, 'debug'));
     // Covers exactly the documented set — no more, no less.
     assert.deepEqual(Object.keys(env).sort(), Object.keys(RUNTIME_ENV_DIRS).sort());
   });

@@ -20,6 +20,10 @@
  * at the "verify login" phase waiting for the post-login nav that never appears.
  */
 
+import { mkdir } from 'fs/promises';
+import { join } from 'path';
+import { logger } from '../../infrastructure/logger.js';
+
 /** The login form lives in this cross-origin iframe; detected by URL (stable). */
 export const LOGIN_FRAME_HOST = 'connect.cal-online.co.il';
 /** Homepage CTA that opens the login iframe (logged-out state only). */
@@ -33,8 +37,13 @@ export const AUTH_NAV_TEXT = 'עסקאות וחיובים';
  * raw (possibly Hebrew) locator that triggered it.
  */
 export class CalLoginError extends Error {
-  constructor(phase, { timedOut = false } = {}) {
-    super(`CAL login failed during "${phase}"${timedOut ? ' (timed out)' : ''}.`);
+  constructor(phase, { timedOut = false, detail = '' } = {}) {
+    super(
+      `CAL login failed during "${phase}"${timedOut ? ' (timed out)' : ''}.` +
+      // `detail` is only ever a safe, content-free string (e.g. a debug artifact
+      // file path) — never page content, credentials, cookies, or a raw locator.
+      (detail ? ` ${detail}` : '')
+    );
     this.name = 'CalLoginError';
     this.phase = phase;
     this.timedOut = timedOut;
@@ -71,20 +80,104 @@ async function waitForLoginFrame(page, timeout = 15000) {
   return frame; // may be null
 }
 
-export async function login(page, username, password) {
-  // Phase 1 — reach the login form. Prefer the stable iframe URL signal: if the
-  // iframe is already present, use it directly; otherwise click the homepage CTA
-  // (clean logged-out state) and wait for the iframe by URL.
-  const loginFrame = await phase('open login form', async () => {
-    let frame = findLoginFrame(page);
-    if (!frame) {
-      await page.waitForSelector(`text=${LOGIN_CTA_TEXT}`, { timeout: 15000 });
-      await page.click(`text=${LOGIN_CTA_TEXT}`);
-      frame = await waitForLoginFrame(page, 15000);
+/** Directory for failure diagnostics; redirected under userData in packaged builds. */
+function debugDir() {
+  return process.env.DEBUG_DIR || 'runtime/debug';
+}
+
+/**
+ * Bring the browser window to the front. CAL only opens its login iframe when a
+ * real, visible window is active, so we foreground the page before the form step.
+ * bringToFront() exists on every real Playwright page; guarded so test fakes
+ * without it (and any failure) are harmless no-ops.
+ */
+async function bringToFront(page) {
+  if (typeof page.bringToFront === 'function') {
+    await page.bringToFront().catch(() => {});
+  }
+}
+
+/**
+ * A single attempt to reach the login iframe. Prefer the stable iframe URL signal:
+ * if the iframe is already present, use it directly; otherwise click the homepage
+ * CTA (clean logged-out state) and wait for the iframe by URL.
+ */
+async function tryOpenLoginForm(page) {
+  let frame = findLoginFrame(page);
+  if (!frame) {
+    await page.waitForSelector(`text=${LOGIN_CTA_TEXT}`, { timeout: 15000 });
+    await page.click(`text=${LOGIN_CTA_TEXT}`);
+    frame = await waitForLoginFrame(page, 15000);
+  }
+  if (!frame) throw new CalLoginError('open login form', { timedOut: true });
+  return frame;
+}
+
+/**
+ * Save content-free diagnostics for a failed "open login form" step under
+ * runtime/debug/: a full-page screenshot, plus the current URL and page title
+ * (logged, not embedded in the thrown error). Returns the artifact details or
+ * null if nothing could be captured. Never throws.
+ */
+async function dumpLoginFormDebug(page) {
+  try {
+    if (typeof page.screenshot !== 'function') return null;
+    const dir = debugDir();
+    await mkdir(dir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const screenshotPath = join(dir, `cal-open-login-fail_${ts}.png`);
+
+    let url = '(unavailable)';
+    let title = '(unavailable)';
+    try { url = (typeof page.url === 'function' ? page.url() : '') || '(unavailable)'; } catch { /* ignore */ }
+    try { title = (typeof page.title === 'function' ? await page.title() : '') || '(unavailable)'; } catch { /* ignore */ }
+
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    return { screenshotPath, url, title };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reach the login form, retrying ONLY the form-opening step exactly once before
+ * failing. The retry never re-runs credential entry, submit, or the transaction
+ * fetch. On final failure it persists diagnostics (screenshot + URL + title) and
+ * raises a content-free CalLoginError naming the debug artifact path.
+ */
+async function openLoginForm(page) {
+  await bringToFront(page);
+  try {
+    return await tryOpenLoginForm(page);
+  } catch (firstErr) {
+    logger.warn('CAL "open login form" failed — retrying once', {
+      provider: 'CAL',
+      timedOut: firstErr instanceof CalLoginError ? firstErr.timedOut : isTimeout(firstErr),
+    });
+    await bringToFront(page);
+    try {
+      return await tryOpenLoginForm(page);
+    } catch (secondErr) {
+      const timedOut = secondErr instanceof CalLoginError ? secondErr.timedOut : isTimeout(secondErr);
+      const artifact = await dumpLoginFormDebug(page);
+      if (artifact) {
+        logger.warn(`Saved CAL login-form debug artifacts to ${artifact.screenshotPath}`, {
+          provider: 'CAL',
+          url:   artifact.url,
+          title: artifact.title,
+        });
+      }
+      throw new CalLoginError('open login form', {
+        timedOut,
+        detail: artifact ? `Debug artifacts: ${artifact.screenshotPath}` : '',
+      });
     }
-    if (!frame) throw new CalLoginError('open login form', { timedOut: true });
-    return frame;
-  });
+  }
+}
+
+export async function login(page, username, password) {
+  // Phase 1 — reach the login form (with one safe retry of just this step).
+  const loginFrame = await openLoginForm(page);
 
   // Phase 2 — select the regular (username/password) login tab (stable id).
   await phase('select regular login', async () => {

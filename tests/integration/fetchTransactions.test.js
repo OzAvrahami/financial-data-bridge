@@ -157,6 +157,66 @@ describe('fetchTransactions — expired-session recovery', () => {
   });
 });
 
+// ── Visible-browser providers (CAL): headed launch + user-facing notice ────────
+
+describe('fetchTransactions — requiresVisibleBrowser providers', () => {
+  it('forces a headed browser launch, overriding a headless browserConfig', async () => {
+    const deps = makeDeps({ providerOpts: { requiresVisibleBrowser: true } });
+
+    await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true, browserConfig: { headless: true, slowMo: 0 } },
+      deps
+    );
+
+    assert.equal(deps.browser.launchOptions.headless, false, 'launched headed despite headless config');
+  });
+
+  it('emits a visible-browser-notice event before a fresh login', async () => {
+    const events = [];
+    const deps = makeDeps({ providerOpts: { requiresVisibleBrowser: true } });
+
+    await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true, onEvent: (e) => events.push(e.type) },
+      deps
+    );
+
+    const noticeIdx = events.indexOf('visible-browser-notice');
+    const loginIdx  = events.indexOf('login');
+    assert.ok(noticeIdx >= 0, 'notice was emitted');
+    assert.ok(loginIdx >= 0 && noticeIdx < loginIdx, 'notice precedes the login event');
+  });
+
+  it('does not force headed (or emit the notice) for ordinary providers', async () => {
+    const events = [];
+    const deps = makeDeps({ providerOpts: { requiresVisibleBrowser: false } });
+
+    await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true, browserConfig: { headless: true, slowMo: 0 }, onEvent: (e) => events.push(e.type) },
+      deps
+    );
+
+    assert.equal(deps.browser.launchOptions.headless, true, 'headless config respected');
+    assert.ok(!events.includes('visible-browser-notice'), 'no notice for ordinary providers');
+  });
+
+  it('does not emit the notice when a valid session is reused (no login)', async () => {
+    const events = [];
+    const deps = makeDeps({
+      providerOpts: { requiresVisibleBrowser: true, sessionValid: true },
+      sessionState: { cookies: [], origins: [] },
+    });
+
+    await fetchTransactions(
+      { credentials: TEST_CREDS, skipExport: true, onEvent: (e) => events.push(e.type) },
+      deps
+    );
+
+    // Still launches headed (whole CAL run is visible), but no login → no notice.
+    assert.equal(deps.browser.launchOptions.headless, false, 'still launched headed');
+    assert.ok(!events.includes('visible-browser-notice'), 'no login notice when session reused');
+  });
+});
+
 // ── Fetch result handling ─────────────────────────────────────────────────────
 
 describe('fetchTransactions — fetch results', () => {

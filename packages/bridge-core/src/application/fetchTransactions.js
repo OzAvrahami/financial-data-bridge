@@ -130,8 +130,22 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     }
 
     // ── Session restore ───────────────────────────────────────────────────
+    // Providers that opt into `requiresVisibleBrowser` (CAL) must run HEADED:
+    // their login UI only renders in a real, visible window. Force headless off
+    // for them, overriding the configured/default value. All other providers keep
+    // exactly the configured behavior.
+    const effectiveBrowserConfig = provider.requiresVisibleBrowser
+      ? { ...browserConfig, headless: false }
+      : browserConfig;
+    if (provider.requiresVisibleBrowser) {
+      logger.info('Provider requires a visible browser — launching headed', {
+        provider: providerName,
+        account:  accountId,
+      });
+    }
+
     const savedSession = await sessionStore.load(providerName, accountId);
-    const page = await browser.launch(browserConfig, savedSession);
+    const page = await browser.launch(effectiveBrowserConfig, savedSession);
     provider.setPage(page);
 
     // ── Session validation ────────────────────────────────────────────────
@@ -151,6 +165,11 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
     // ── Initial authentication (if needed) ────────────────────────────────
     if (!authenticated) {
+      // Surface a clear, secret-free notice before a headed login begins so the
+      // user knows the popup browser window is expected and must stay in front.
+      if (provider.requiresVisibleBrowser) {
+        emit({ type: 'visible-browser-notice' });
+      }
       // A restored-but-invalid session leaves stale auth cookies in the context.
       // Logging in on top of that dirty state is what fails (the logged-out login
       // entry never renders). Drop the stale persisted session so a later run

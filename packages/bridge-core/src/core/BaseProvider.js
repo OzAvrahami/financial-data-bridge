@@ -31,6 +31,20 @@ export class BaseProvider {
   }
 
   /**
+   * Provider-level opt-in: when true, the application layer launches the browser
+   * HEADED (visible, foregrounded) for this provider, overriding the configured
+   * `headless` setting. Some sites only render their login UI reliably when a real,
+   * visible browser window is active (CAL's login iframe is one such case).
+   *
+   * Default is false so every other provider keeps the configured behavior. A
+   * provider opts in by overriding this getter to return true.
+   * @returns {boolean}
+   */
+  get requiresVisibleBrowser() {
+    return false;
+  }
+
+  /**
    * Check whether the current browser session is already authenticated.
    * Called once at startup after restoring saved session state.
    * Return false to trigger a fresh login.

@@ -91,6 +91,35 @@ describe('CAL login — reuses an already-open iframe (page-state preference)', 
   });
 });
 
+describe('CAL login — open-login-form retry + bring-to-front', () => {
+  it('brings the window to front and retries the form-opening step once before succeeding', async () => {
+    const frame = makeFrame();
+    let ctaAttempts = 0;       // how many times the CTA wait was attempted
+    let broughtToFront = 0;
+    const page = {
+      bringToFront: async () => { broughtToFront++; },
+      // The login iframe only becomes present on the SECOND form-open attempt.
+      frames: () => (ctaAttempts >= 2 ? [frame] : []),
+      async waitForSelector(sel) {
+        if (sel === `text=${LOGIN_CTA_TEXT}`) {
+          ctaAttempts++;
+          if (ctaAttempts === 1) throw new Error('Timeout 15000ms exceeded'); // first try fails
+          return {}; // second try: CTA resolves
+        }
+        return {}; // authenticated-nav check resolves
+      },
+      async click() { /* CTA click; the iframe appears via frames() on attempt 2 */ },
+    };
+
+    await login(page, 'u', 'p');
+
+    assert.ok(broughtToFront >= 1, 'page was brought to the front before opening the form');
+    assert.equal(ctaAttempts, 2, 'the form-opening step was retried exactly once');
+    // Credential entry/submit ran exactly once, on the frame found after the retry.
+    assert.deepEqual(frame.calls.fills, [['#mat-input-2', 'u'], ['#mat-input-3', 'p']]);
+  });
+});
+
 describe('CAL login — phase-labeled, content-free errors', () => {
   it('throws CalLoginError naming the verify phase, with no Hebrew/credentials leaked', async () => {
     const frame = makeFrame();

@@ -30,6 +30,10 @@ export function createFakeProvider(opts = {}) {
     name: opts.name ?? 'FAKE',
     page: null,
 
+    // Opt-in flag mirrored from BaseProvider; lets tests exercise the headed-launch
+    // override in the application layer without a real provider/browser.
+    requiresVisibleBrowser: opts.requiresVisibleBrowser ?? false,
+
     setPage(page) { this.page = page; },
 
     async isSessionValid() {

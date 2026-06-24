@@ -493,6 +493,8 @@ function formatProgress(evt) {
   switch (evt.type) {
     case 'account-start':
       return `▶ ${who} — starting (days back ${evt.daysBack ?? 'global'})…`;
+    case 'visible-browser-notice':
+      return `   ${who} — CAL login requires a visible browser window. Keep it open until login completes.`;
     case 'login':
       return `   ${who} — ${evt.sessionReused ? 'reused saved session' : 'logged in'}.`;
     case 'fetched':

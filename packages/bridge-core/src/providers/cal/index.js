@@ -14,6 +14,16 @@ export class CalProvider extends BaseProvider {
   }
 
   /**
+   * CAL's login form lives in an Angular Material iframe (connect.cal-online.co.il)
+   * that only opens reliably when a real, visible, foregrounded browser window is
+   * active. Run headless/minimized and the "open login form" step times out. Opt
+   * into a headed, foregrounded browser for the whole CAL run.
+   */
+  get requiresVisibleBrowser() {
+    return true;
+  }
+
+  /**
    * Navigate to CAL homepage and check for the authenticated nav element.
    * Used to decide whether a saved session can be reused at startup.
    */
@@ -48,6 +58,13 @@ export class CalProvider extends BaseProvider {
   async login(credentials) {
     await this.page.goto('https://www.cal-online.co.il');
     await this.page.waitForLoadState('networkidle');
+    // CAL requires an active, visible window for the login iframe to open. Bring
+    // the browser to the front before the login flow starts (no-op if it already
+    // is). bringToFront() exists on every real Playwright page; guarded so test
+    // fakes without it still work.
+    if (typeof this.page.bringToFront === 'function') {
+      await this.page.bringToFront().catch(() => {});
+    }
     await login(this.page, credentials.username, credentials.password);
   }
 

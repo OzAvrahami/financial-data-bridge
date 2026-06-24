@@ -34,6 +34,8 @@ const RUNTIME_ENV_DIRS = {
   SEEN_DIR:           'seen',
   FINANCE_LEDGER_DIR: 'finance-ledger',
   REPORTS_DIR:        'reports',
+  // Failure diagnostics (e.g. CAL login-form screenshots) written by providers.
+  DEBUG_DIR:          'debug',
 };
 
 /**
