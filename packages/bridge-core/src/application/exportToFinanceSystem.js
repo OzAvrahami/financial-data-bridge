@@ -52,6 +52,45 @@ export function parseRetryAfterMs(response) {
     }
 }
 
+/** Best-effort existing/remote transaction id from a (JSON) conflict body. */
+function extractRemoteId(bodyText) {
+    if (!bodyText) return null;
+    try {
+        const d = JSON.parse(bodyText);
+        return d?.existing_id ?? d?.existingId ?? d?.existing_transaction_id
+            ?? d?.duplicate_id ?? d?.transaction_id ?? d?.id ?? d?.data?.id ?? null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Decide whether an HTTP 409 means "this transaction already exists" (idempotent
+ * duplicate on our external_id/dedupKey) vs. an ambiguous conflict.
+ *
+ * We POST every transaction with a UNIQUE external_id = dedupKey, so a 409 on that
+ * request is, by construction, a uniqueness conflict on our key. Still, we do not
+ * mark it idempotent "blindly": the decision is body-driven by default.
+ *
+ *   FINANCE_409_AS_DUPLICATE = 'auto' (default) → duplicate only when the body shows
+ *                              a duplicate/conflict/exists/unique/external_id signal
+ *                              (or carries an existing id).
+ *                            = 'true'  → always treat 409 as an idempotent duplicate.
+ *                            = 'false' → never (all 409 stay a conflict failure).
+ *
+ * @returns {{ duplicate: boolean, remoteId: string|null }}
+ */
+export function classify409(bodyText) {
+    const mode = String(process.env.FINANCE_409_AS_DUPLICATE || 'auto').toLowerCase();
+    const remoteId = extractRemoteId(bodyText);
+    if (mode === 'true')  return { duplicate: true, remoteId };
+    if (mode === 'false') return { duplicate: false, remoteId };
+    const lc = String(bodyText || '').toLowerCase();
+    const signal = /duplicat|already[\s_-]*exist|already[\s_-]*sent|conflict|unique|external[_\s-]?id|dedup/.test(lc)
+        || remoteId != null;
+    return { duplicate: signal, remoteId };
+}
+
 /** Build the finance-system payload for a single transaction. */
 function buildFinancePayload(transaction, originalAmount) {
     return {
@@ -153,6 +192,22 @@ export async function sendTransactionToFinance(transaction, financeConfig = {}, 
                 apiStatus: response.status,
                 retryAfterMs: parseRetryAfterMs(response),
                 message: `HTTP 429${safeBody}`,
+            };
+        }
+
+        // 409 Conflict — the finance API rejected a UNIQUE external_id (= dedupKey)
+        // that already exists. When the body confirms a duplicate/existing record,
+        // this is an idempotent "already accepted" (see classify409), NOT a
+        // validation failure. An ambiguous 409 stays a conflict FAILURE.
+        if (response.status === 409) {
+            const { duplicate, remoteId } = classify409(bodyText);
+            return {
+                ok: false,
+                classification: duplicate ? "remote_already_exists" : "api_conflict",
+                apiStatus: 409,
+                duplicate,
+                remoteId,
+                message: `HTTP 409${safeBody}`,
             };
         }
 

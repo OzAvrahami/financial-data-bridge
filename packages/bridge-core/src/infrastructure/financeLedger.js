@@ -60,13 +60,18 @@ export class FinanceLedger {
     return !!(e && e.sentAt && e.financeStatus === 'sent');
   }
 
-  /** Record a successful send. Stores the contentHash so later content changes are detectable. */
-  recordSent(dedupKey, { contentHash = null, apiStatus = null, financeTransactionId = null } = {}) {
+  /**
+   * Record a successful accept. Stores the contentHash so later content changes are
+   * detectable. `reason` distinguishes a normal send ('already_sent_successfully')
+   * from a server-confirmed idempotent duplicate ('remote_already_exists'); both are
+   * `financeStatus: 'sent'`, so `wasSentSuccessfully` treats them identically.
+   */
+  recordSent(dedupKey, { contentHash = null, apiStatus = null, financeTransactionId = null, reason = 'already_sent_successfully' } = {}) {
     const now = new Date().toISOString();
     const prev = this._entries.get(dedupKey);
     this._entries.set(dedupKey, {
       financeStatus: 'sent',
-      reason: 'already_sent_successfully',
+      reason,
       contentHash,
       apiStatus,
       financeTransactionId,
