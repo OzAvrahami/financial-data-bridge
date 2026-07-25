@@ -35,6 +35,23 @@ export function shouldSendTransaction(transaction) {
     return true;
 }
 
+/**
+ * Parse a Retry-After header into milliseconds. Supports the delta-seconds form
+ * ("120") and the HTTP-date form. Returns null when absent/unparseable.
+ */
+export function parseRetryAfterMs(response) {
+    try {
+        const v = response?.headers?.get?.('retry-after');
+        if (!v) return null;
+        const str = String(v).trim();
+        if (/^\d+$/.test(str)) return Number(str) * 1000;
+        const when = Date.parse(str);
+        return Number.isFinite(when) ? Math.max(0, when - Date.now()) : null;
+    } catch {
+        return null;
+    }
+}
+
 /** Build the finance-system payload for a single transaction. */
 function buildFinancePayload(transaction, originalAmount) {
     return {
@@ -125,6 +142,20 @@ export async function sendTransactionToFinance(transaction, financeConfig = {}, 
         // The response body may echo sensitive data — redact + truncate it.
         const bodyText = await response.text().catch(() => "");
         const safeBody = bodyText ? ` — ${truncate(redactSecrets(bodyText, [apiKey]), 200)}` : "";
+
+        // 429 Too Many Requests is RATE LIMITING, not a validation failure. It is
+        // retryable with backoff (respecting Retry-After) and must never be recorded
+        // as sent. Classified separately so the sync engine can retry it.
+        if (response.status === 429) {
+            return {
+                ok: false,
+                classification: "rate_limited",
+                apiStatus: response.status,
+                retryAfterMs: parseRetryAfterMs(response),
+                message: `HTTP 429${safeBody}`,
+            };
+        }
+
         // 4xx → the request was rejected (validation/auth); 5xx/other → server-side.
         const classification = response.status >= 400 && response.status < 500
             ? "api_validation_failed"

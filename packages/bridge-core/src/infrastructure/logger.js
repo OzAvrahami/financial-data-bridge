@@ -1,9 +1,31 @@
+import { appendFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
+
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 
 const currentLevel = () => {
   if (process.env.DEBUG === 'true') return 'debug';
   return process.env.LOG_LEVEL || 'info';
 };
+
+// Optional file sink. When LOG_FILE is set (the desktop app sets it under
+// runtime/debug so a packaged run — whose stdout is invisible — still leaves a
+// readable log), every emitted line is ALSO appended there. Best-effort: a
+// logging/IO error must never break a run, so all failures are swallowed.
+let _logDirReady = false;
+function writeToLogFile(line) {
+  const file = process.env.LOG_FILE;
+  if (!file) return;
+  try {
+    if (!_logDirReady) {
+      mkdirSync(dirname(file), { recursive: true });
+      _logDirReady = true;
+    }
+    appendFileSync(file, line);
+  } catch {
+    /* never let a logging failure affect the run */
+  }
+}
 
 function log(level, message, meta) {
   if (LEVELS[level] < LEVELS[currentLevel()]) return;
@@ -15,6 +37,8 @@ function log(level, message, meta) {
 
   if (level === 'error') process.stderr.write(line);
   else process.stdout.write(line);
+
+  writeToLogFile(line);
 }
 
 // Strip known secret-looking keys from logged metadata

@@ -23,6 +23,7 @@
 import { mkdir } from 'fs/promises';
 import { join } from 'path';
 import { logger } from '../../infrastructure/logger.js';
+import { timeStage } from '../../infrastructure/timing.js';
 
 /** The login form lives in this cross-origin iframe; detected by URL (stable). */
 export const LOGIN_FRAME_HOST = 'connect.cal-online.co.il';
@@ -176,32 +177,35 @@ async function openLoginForm(page) {
 }
 
 export async function login(page, username, password) {
+  // Phase timings (temporary diagnostics) isolate the login-form-open and the
+  // post-submit verify waits — the two CAL steps most prone to long silent waits.
+
   // Phase 1 — reach the login form (with one safe retry of just this step).
-  const loginFrame = await openLoginForm(page);
+  const loginFrame = await timeStage('cal.login.openForm', () => openLoginForm(page));
 
   // Phase 2 — select the regular (username/password) login tab (stable id).
-  await phase('select regular login', async () => {
+  await timeStage('cal.login.selectRegular', () => phase('select regular login', async () => {
     await loginFrame.waitForSelector('#regular-login', { timeout: 15000 });
     await loginFrame.click('#regular-login');
-  });
+  }));
 
   // Phase 3 — fill credentials (stable Angular Material input ids; click to focus
   // before fill, which Material inputs require).
-  await phase('enter credentials', async () => {
+  await timeStage('cal.login.enterCredentials', () => phase('enter credentials', async () => {
     await loginFrame.waitForSelector('#mat-input-2', { timeout: 20000 });
     await loginFrame.click('#mat-input-2');
     await loginFrame.fill('#mat-input-2', username);
     await loginFrame.click('#mat-input-3');
     await loginFrame.fill('#mat-input-3', password);
-  });
+  }));
 
   // Phase 4 — submit.
-  await phase('submit', async () => {
+  await timeStage('cal.login.submit', () => phase('submit', async () => {
     await loginFrame.click('button[type="submit"]');
-  });
+  }));
 
   // Phase 5 — verify via the authenticated nav element (page-state check).
-  await phase('verify login', async () => {
+  await timeStage('cal.login.verify', () => phase('verify login', async () => {
     await page.waitForSelector(`text=${AUTH_NAV_TEXT}`, { timeout: 20000 });
-  });
+  }));
 }

@@ -332,8 +332,23 @@ function configurePackagedRuntime() {
   applyBundledBrowsersPath(process.resourcesPath);
 }
 
+/**
+ * Point the bridge-core logger at a file so a run always leaves a readable log —
+ * essential for a packaged build whose main-process stdout is invisible. The file
+ * lives under the same debug dir as other diagnostics (userData/runtime/debug when
+ * packaged; repo runtime/debug in a dev checkout). Must run AFTER
+ * configurePackagedRuntime() so DEBUG_DIR is already resolved for packaged builds.
+ * An explicit LOG_FILE always wins.
+ */
+function configureTimingLog() {
+  if (process.env.LOG_FILE) return;
+  const debugDir = process.env.DEBUG_DIR || path.join(__dirname, '..', '..', 'runtime', 'debug');
+  process.env.LOG_FILE = path.join(debugDir, 'sync-timing.log');
+}
+
 app.whenReady().then(() => {
   configurePackagedRuntime();
+  configureTimingLog();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

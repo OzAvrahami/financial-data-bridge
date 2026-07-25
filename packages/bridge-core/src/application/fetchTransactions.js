@@ -3,8 +3,11 @@ import { BrowserManager } from '../core/BrowserManager.js';
 import { SessionStore } from '../infrastructure/sessionStore.js';
 import { CheckpointStore } from '../infrastructure/checkpointStore.js';
 import { SeenStore, contentHash, classifyTransaction, assignOccurrenceKeys } from '../infrastructure/dedup.js';
+import { FinanceLedger } from '../infrastructure/financeLedger.js';
+import { buildDryRunPlan, logDryRunPlan } from './exportDryRunPlan.js';
 import { logger } from '../infrastructure/logger.js';
 import { withRetry } from '../infrastructure/retry.js';
+import { startTimer, elapsedMs, timeStage } from '../infrastructure/timing.js';
 import { metrics } from '../infrastructure/metrics.js';
 import { createRunReport, finalizeReport } from '../schema/runReport.js';
 import { exportToJSON } from '../exporter.js';
@@ -144,8 +147,13 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
       });
     }
 
+    // ── End-to-end run timer (temporary diagnostics — see timing.js) ───────
+    const runStart = startTimer();
+
     const savedSession = await sessionStore.load(providerName, accountId);
-    const page = await browser.launch(effectiveBrowserConfig, savedSession);
+    const page = await timeStage('run.browserLaunch', () => browser.launch(effectiveBrowserConfig, savedSession), {
+      provider: providerName, headless: effectiveBrowserConfig.headless ?? true,
+    });
     provider.setPage(page);
 
     // ── Session validation ────────────────────────────────────────────────
@@ -153,7 +161,7 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
 
     if (savedSession) {
       logger.info('Attempting to reuse saved session', { provider: providerName, account: accountId });
-      authenticated = await provider.isSessionValid(page);
+      authenticated = await timeStage('run.isSessionValid', () => provider.isSessionValid(page), { provider: providerName });
 
       if (authenticated) {
         report.sessionReused = true;
@@ -179,7 +187,7 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
         await sessionStore.clear(providerName, accountId).catch(() => {});
       }
 
-      await withRetry(
+      await timeStage('run.login', () => withRetry(
         async () => {
           await browser.clearSession().catch(() => {});
           await provider.login(credentials);
@@ -190,7 +198,7 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
           label: `${provider.name} login`,
           onRetry: () => { report.retryCount++; },
         }
-      );
+      ), { provider: providerName });
       logger.info('Login successful', { provider: providerName, account: accountId });
 
       const newState = await browser.getStorageState();
@@ -229,11 +237,11 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     let reAuthAttempted = false;
 
     try {
-      fetchResult = await provider.fetchTransactions({
+      fetchResult = await timeStage('run.fetchTransactions', () => provider.fetchTransactions({
         daysBack:   fetchConfig.daysBack,
         startIndex,
         onProgress,
-      });
+      }), { provider: providerName, daysBack: fetchConfig.daysBack });
     } catch (fetchErr) {
       const isAuth = await provider.isAuthError(fetchErr).catch(() => false);
 
@@ -325,6 +333,33 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
       logger.warn(`${providerWarnings.length} transaction(s) skipped during extraction`, { provider: providerName });
     }
 
+    // ── Dry-run plan (CAL_EXPORT_DRY_RUN_PLAN=true) ───────────────────────
+    // Run the fetched (already normalized + occurrence-keyed) transactions through
+    // the REAL identity pipeline READ-ONLY: classify against the loaded SeenStore
+    // and look up a freshly-loaded FinanceLedger — WITHOUT saving either, writing an
+    // export file, or contacting Finance. Then short-circuit so nothing is mutated.
+    if (process.env.CAL_EXPORT_DRY_RUN_PLAN === 'true') {
+      const ledgerProvider = allTransactions[0]?.provider ?? providerName;
+      const ledger = new FinanceLedger(config.financeLedger.dir);
+      await ledger.load(ledgerProvider, accountId); // read-only load; never saved
+
+      const plan = buildDryRunPlan({
+        transactions:  allTransactions,
+        seenStore:     fullFetch ? null : seenStore, // read-only; never saved
+        financeLedger: ledger,
+        exportStats:   fetchResult.exportStats ?? null,
+        fullFetch,
+      });
+      logDryRunPlan(plan);
+      logger.warn('[cal-export-plan] DRY-RUN only — nothing imported, no SeenStore/FinanceLedger writes, no Finance contact', { provider: providerName });
+
+      report.dryRunPlan = true;
+      finalizeReport(report, { status: 'success' });
+      metrics.recordRun(report);
+      // Import nothing: empty considered set means the finance step is never attempted.
+      return { transactions: [], consideredTransactions: [], filePath: null, report, dryRunPlan: plan };
+    }
+
     // ── Deduplication ─────────────────────────────────────────────────────
     // Classify each transaction as created / updated / unchanged.
     // Uses tx.dedupKey (set by assignOccurrenceKeys above) as the canonical
@@ -344,6 +379,7 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     // stamped in place with `localDedupStatus` so it travels with the object.
     const consideredTxs = [];
 
+    const dedupStart = startTimer();
     for (const tx of allTransactions) {
       const key = tx.dedupKey;
 
@@ -372,6 +408,12 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
       }
       consideredTxs.push(tx);
     }
+
+    logger.info('[timing] run.dedupLoop', {
+      provider: providerName,
+      considered: allTransactions.length,
+      totalMs: elapsedMs(dedupStart),
+    });
 
     report.createdCount            = createdCount;
     report.updatedCount            = updatedCount;
@@ -429,6 +471,34 @@ export async function fetchTransactions(opts = {}, _deps = {}) {
     const runStatus = providerWarnings.length > 0 ? 'partial' : 'success';
     finalizeReport(report, { status: runStatus });
     metrics.recordRun(report);
+
+    const runTotalMs = elapsedMs(runStart);
+    logger.info('[timing] run.total', {
+      provider: providerName,
+      account: accountId,
+      sessionReused: report.sessionReused === true,
+      considered: allTransactions.length,
+      totalMs: runTotalMs,
+    });
+
+    // ── Single, human-readable per-account timing summary ─────────────────────
+    // One key=value line so a run's headline numbers are grep-friendly. Emitted
+    // for every provider; CAL supplies the rich row-loop aggregates via
+    // fetchResult.timing (absent for providers/tests that don't report them).
+    const t = fetchResult?.timing;
+    const label = displayName || accountId;
+    if (t) {
+      logger.info(
+        `[timing-summary] account="${label}" provider=${providerName} sessionReused=${report.sessionReused === true} ` +
+        `dateFilter=${t.dateFilterApplied ? 'applied' : 'MISSING'} ` +
+        `calFetchMs=${t.calFetchMs} navMs=${t.navMs} filterMs=${t.filterMs} countMs=${t.countMs} ` +
+        `rowCount=${t.rowCount} rowLoopMs=${t.rowLoopMs} avgRowMs=${t.avgRowMs} slowestRowMs=${t.slowestRowMs} ` +
+        `openAvgMs=${t.openAvgMs} openMaxMs=${t.openMaxMs} extractAvgMs=${t.extractAvgMs} extractMaxMs=${t.extractMaxMs} ` +
+        `closeAvgMs=${t.closeAvgMs} closeMaxMs=${t.closeMaxMs} accountTotalMs=${runTotalMs}`
+      );
+    } else {
+      logger.info(`[timing-summary] account="${label}" provider=${providerName} accountTotalMs=${runTotalMs}`);
+    }
 
     // `transactions` stays the local-export set (created + updated) for backward
     // compatibility. `consideredTransactions` is the full set the finance sync
