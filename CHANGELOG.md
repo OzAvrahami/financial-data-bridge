@@ -24,6 +24,8 @@ Candidate metadata is 3.1.0; dependency versions are unchanged. Publication and 
 
 ### Fixed
 
+- Display the running application version beside the desktop header using Electron
+  environment info, without hardcoding the release number or changing settings.
 - Forward the selected finance contract version through desktop sync orchestration;
   keep the default legacy configuration unchanged.
 - Scope v2 by exact CAL source-account ID and payment-source name across settings,

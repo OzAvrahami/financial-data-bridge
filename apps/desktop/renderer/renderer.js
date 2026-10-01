@@ -99,6 +99,9 @@ function validateDaysBack(value) {
 async function loadEnv() {
   try {
     const info = await window.bridge.getEnvInfo();
+    const version = typeof info.version === 'string' ? info.version.trim() : '';
+    $('app-version').textContent = version ? `v${version}` : '';
+    $('app-version').hidden = !version;
     $('env-status').textContent   = info.status ?? '—';
     $('env-mode').textContent     = info.mode ?? '—';
     $('env-node').textContent     = info.node ?? '—';

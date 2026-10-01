@@ -14,6 +14,9 @@ package.json being 3.0.3. Preparation corrects that pre-existing metadata drift 
 
 ## Release notes
 
+- Show the running Electron application version beside the desktop header, with
+  wrapping at narrow widths. This correction remains in unpublished v3.1.0;
+  rebuilt installer/portable hashes replace the previous artifacts' hashes.
 - Opt-in exact CAL stream selection replaces a global contract switch. Select
   provider, source-account ID and full payment-source name; no last4 matching or
   name merging. Unselected streams keep legacy delivery.

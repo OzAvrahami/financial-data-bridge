@@ -139,6 +139,7 @@ function createWindow() {
 
 ipcMain.handle('app:getEnvInfo', () => ({
   appName:  'Financial Data Bridge',
+  version:  app.getVersion(),
   status:   'Ready',
   mode:     'live — real CAL automation (Playwright)',
   node:     process.versions.node,
