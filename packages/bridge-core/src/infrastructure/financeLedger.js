@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { readFile, writeFile, mkdir, rename } from 'fs/promises';
 import { join } from 'path';
 
@@ -66,10 +67,12 @@ export class FinanceLedger {
    * from a server-confirmed idempotent duplicate ('remote_already_exists'); both are
    * `financeStatus: 'sent'`, so `wasSentSuccessfully` treats them identically.
    */
-  recordSent(dedupKey, { contentHash = null, apiStatus = null, financeTransactionId = null, reason = 'already_sent_successfully' } = {}) {
+  recordSent(dedupKey, { contentHash = null, apiStatus = null, financeTransactionId = null, reason = 'already_sent_successfully', financialPosted = null, observationId = null, disposition = null } = {}) {
     const now = new Date().toISOString();
     const prev = this._entries.get(dedupKey);
     this._entries.set(dedupKey, {
+      ...prev,
+      financialPosted, observationId, disposition,
       financeStatus: 'sent',
       reason,
       contentHash,
@@ -82,7 +85,7 @@ export class FinanceLedger {
   }
 
   /** Record a failed attempt. Preserves any prior successful sentAt (never downgrades a real send). */
-  recordFailed(dedupKey, { reason = 'api_error', apiStatus = null } = {}) {
+  recordFailed(dedupKey, { reason = 'api_error', apiStatus = null, terminalConflict = false } = {}) {
     const now = new Date().toISOString();
     const prev = this._entries.get(dedupKey);
     // If it was previously sent successfully, do not overwrite that success.
@@ -91,6 +94,8 @@ export class FinanceLedger {
       return;
     }
     this._entries.set(dedupKey, {
+      ...prev,
+      terminalConflict,
       financeStatus: 'failed',
       reason,
       contentHash: prev?.contentHash ?? null,
@@ -102,17 +107,36 @@ export class FinanceLedger {
     });
   }
 
+  // Only an explicit, known non-accepting legacy rejection can transition a frozen
+  // body. Preserve the old evidence; changed source content needs manual review.
+  upgradeRejected(dedupKey, legacy, replacement, contentHash) {
+    const previous = this.lookup(dedupKey);
+    if (previous?.apiStatus === 422 && !previous.sentAt && !previous.frozenPayload?.cal_contract
+      && ['cal_supported_ils_purchase_required','cal_unsupported_amount_basis'].includes(previous.reason)
+      && isDeepStrictEqual(previous.frozenPayload, legacy)) {
+      this._entries.set(dedupKey, { ...previous, rejectedLegacyPayload: previous.frozenPayload,
+        frozenPayload: structuredClone(replacement), frozenContentHash: contentHash });
+    }
+  }
+
+  // Called and saved BEFORE the first HTTP attempt, including retries after restart.
+  freeze(dedupKey, payload, contentHash) {
+    const previous = this.lookup(dedupKey);
+    if (!previous?.frozenPayload) this._entries.set(dedupKey, { ...previous, frozenContentHash: contentHash, frozenPayload: structuredClone(payload) });
+    return this.lookup(dedupKey).frozenPayload;
+  }
+
   get size() { return this._entries.size; }
 
-  /** Loads persisted entries from disk. Missing/corrupt file → empty ledger. */
+  /** Loads persisted entries from disk. Missing file → empty ledger; corrupt/unreadable state fails closed. */
   async load(provider, accountId = 'default') {
     try {
       const raw = await readFile(this.filePath(provider, accountId), 'utf-8');
       const data = JSON.parse(raw);
-      this._entries = data?.entries && typeof data.entries === 'object'
-        ? new Map(Object.entries(data.entries))
-        : new Map();
-    } catch {
+      if (!data?.entries || typeof data.entries !== 'object' || Array.isArray(data.entries)) throw Error('Invalid ledger');
+      this._entries = new Map(Object.entries(data.entries));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw new Error('Finance ledger unreadable; restore it before syncing');
       this._entries = new Map();
     }
     return this;

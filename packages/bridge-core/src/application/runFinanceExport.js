@@ -135,7 +135,7 @@ export async function runFinanceExport(options = {}) {
 
   // Pass the full list; exportToFinanceSystem() applies shouldSendTransaction()
   // internally — preserving the exact send behavior.
-  await exportToFinanceSystem(txs, { apiUrl, apiKey });
+  await exportToFinanceSystem(txs, { apiUrl, apiKey, v2Streams: financeConfig.v2Streams });
 
   // Return a redacted URL only (never the key); callers/UI display this safely.
   return { executed: true, filePath, ...plan, sentCount: plan.qualifyingCount, apiUrl: safeUrl(apiUrl) };

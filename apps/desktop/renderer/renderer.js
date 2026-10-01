@@ -27,6 +27,13 @@ let lastReportPath = null;
 // Friendly text for the per-transaction finance status reasons emitted by the
 // bridge-core sync engine. Keep in sync with syncTransactionsToFinance().
 const FINANCE_REASON_TEXT = {
+  cal_registration_required: 'v2 requires verified account registration on the upgraded consumer',
+  cal_event_semantics_required: 'provider event type needs clarification; no expense posted',
+  cal_installment_identity_required: 'installment identity/accounting review required; no expense posted',
+  cal_refund_policy_required: 'refund posting is not supported; no expense posted',
+  cal_billed_ils_required: 'explicit billed ILS amount is required; no expense posted',
+  accepted_pending_review: 'evidence accepted; no expense posted - review in Finance Tracker',
+  payload_conflict_requires_review: 'payload conflict - automatic retries stopped; review without changing the identity',
   run_mode_fetch_only:            'Fetch Only run — finance was not contacted',
   finance_disabled:               'finance integration is disabled',
   missing_api_url:                'the finance API URL is not set',
@@ -345,6 +352,9 @@ function financeCredentialKey() {
 function collectFinance() {
   return {
     enabled:       $('finance-enabled').checked,
+    v2Streams: [...$('finance-streams').children].map(row => ({ provider: 'cal',
+      providerAccountId: row.querySelector('[data-stream-account]').value,
+      paymentSourceName: row.querySelector('[data-stream-name]').value })),
     apiUrl:        $('finance-url').value.trim(),
     credentialKey: financeCredentialKey(),
   };
@@ -353,7 +363,27 @@ function collectFinance() {
 function loadFinanceUI(finance = {}) {
   $('finance-enabled').checked = finance.enabled === true;
   $('finance-url').value = finance.apiUrl ?? '';
+  $('finance-streams').replaceChildren();
+  for (const stream of finance.v2Streams || []) addFinanceStream(stream);
   refreshFinanceStatus();
+}
+
+function addFinanceStream(stream = {}) {
+  const row = document.createElement('div');
+  row.className = 'acct-fields';
+  for (const [key, attr, title] of [['providerAccountId', 'data-stream-account', 'CAL source account ID'],
+    ['paymentSourceName', 'data-stream-name', 'Exact payment source name']]) {
+    const label = document.createElement('label'); label.className = 'fld';
+    const text = document.createElement('span'); text.textContent = title;
+    const input = document.createElement('input'); input.type = 'text'; input.maxLength = 255;
+    input.setAttribute(attr, ''); input.value = stream[key] || '';
+    label.append(text, input); row.append(label);
+  }
+  const remove = document.createElement('button'); remove.type = 'button';
+  remove.className = 'btn btn-ghost btn-sm'; remove.textContent = 'Remove stream';
+  remove.addEventListener('click', () => { row.remove(); $('btn-finance-stream-add').focus(); });
+  row.append(remove); $('finance-streams').append(row);
+  return row;
 }
 
 async function refreshFinanceStatus() {
@@ -574,7 +604,7 @@ function renderRunSummary(res) {
     const cls = (c.failed > 0) ? 'err' : 'muted';
     financeBlock =
       `<div class="${cls}">• Finance sync — considered ${c.considered ?? 0}: `
-      + `<strong>sent ${c.sent ?? 0}</strong>, already sent ${c.alreadySent ?? 0}, `
+      + `<strong>accepted ${c.sent ?? 0}</strong> (${c.pendingReview ?? 0} pending review, not posted), previously accepted ${c.alreadySent ?? 0}, `
       + `skipped ${c.skipped ?? 0}, failed ${c.failed ?? 0}.</div>`
       + (f.reportPath
           ? `<div class="muted">&nbsp;&nbsp;Audit report: <code>${escapeHtml(f.reportPath)}</code> — use “Open Last Report”.</div>`
@@ -647,6 +677,7 @@ function wire() {
   $('btn-finance-save').addEventListener('click', onSaveFinanceSecret);
   $('btn-finance-delete').addEventListener('click', onDeleteFinanceSecret);
   $('btn-finance-test').addEventListener('click', onTestFinanceConnection);
+  $('btn-finance-stream-add').addEventListener('click', () => addFinanceStream().querySelector('input').focus());
   $('btn-sync-all').addEventListener('click', () => runFetch('all', 'sync'));
   $('btn-sync-default').addEventListener('click', () => runFetch('default', 'sync'));
   $('btn-open-report').addEventListener('click', onOpenReport);

@@ -28,6 +28,9 @@ export const REPORT_COLUMNS = [
   'apiStatus',
   'financeTransactionId',
   'dedupKey',
+  'financialPosted',
+  'observationId',
+  'disposition',
 ];
 
 /** Escape a single CSV field per RFC 4180 (quote if it contains , " or newline). */

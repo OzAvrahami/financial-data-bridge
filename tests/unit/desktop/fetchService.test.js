@@ -22,7 +22,22 @@ const {
   selectAccounts,
   attachCredentials,
   runDesktopFetch,
+  runFinanceSync,
 } = require('../../../apps/desktop/fetchService.cjs');
+
+it('desktop sync forwards exact stream selection while leaving legacy default unchanged', async () => {
+  for (const v2Streams of [undefined, [], [{provider:'cal',providerAccountId:'owner',paymentSourceName:'Exact card'}]]) {
+    let config;
+    await runFinanceSync({ financeMode: 'sync', consideredTransactions: [], fetchSucceeded: true,
+      financeConfig: { enabled: true, apiUrl: 'https://never-called.invalid', apiKey: 'test-only', v2Streams },
+      syncTransactionsToFinance: async args => {
+        config = args.financeConfig;
+        return { executed: true, counts: { failed: 0 } };
+      },
+    });
+    assert.deepEqual(config.v2Streams, v2Streams);
+  }
+});
 
 // ── Stand-ins for the bridge-core selection helpers (same semantics) ──────────
 const getDefaultAccount  = (a = []) => a.find(x => x && (x.isDefault || x.default)) ?? a[0] ?? null;

@@ -269,7 +269,7 @@ ipcMain.handle('fetch:run', async (event, payload = {}) => {
       // finance is enabled; the sync engine self-gates (and still writes an audit
       // report) when disabled or when the URL/key is missing.
       const fin = settings.finance || {};
-      const financeConfig = { enabled: fin.enabled === true, apiUrl: fin.apiUrl || '', apiKey: '' };
+      const financeConfig = { v2Streams: fin.v2Streams || [], enabled: fin.enabled === true, apiUrl: fin.apiUrl || '', apiKey: '' };
       let syncTransactionsToFinance;
       if (financeMode === 'sync') {
         if (financeConfig.enabled) {

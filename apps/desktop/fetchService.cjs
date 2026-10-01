@@ -154,7 +154,8 @@ async function runFinanceSync({
   try {
     const r = await syncTransactionsToFinance({
       consideredTransactions,
-      financeConfig: { enabled: financeConfig.enabled, apiUrl: financeConfig.apiUrl, apiKey: financeConfig.apiKey },
+      financeConfig: { enabled: financeConfig.enabled, apiUrl: financeConfig.apiUrl, apiKey: financeConfig.apiKey,
+        ...(financeConfig.v2Streams !== undefined ? { v2Streams: financeConfig.v2Streams } : {}) },
       fetchSucceeded,
       onEvent,
       ...(ledgerDir ? { ledgerDir } : {}),

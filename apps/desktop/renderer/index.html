@@ -85,7 +85,7 @@
         <label class="fld">
           <span class="fld-label">API URL / endpoint</span>
           <input id="finance-url" type="text" placeholder="https://your-finance-system/api/transactions" />
-        </label>
+          </label>
         <label class="fld">
           <span class="fld-label">API key / token</span>
           <input id="finance-key" type="password" placeholder="paste key to save / replace" />
@@ -98,6 +98,12 @@
         <span id="finance-status" class="badge">checking…</span>
       </div>
       <p class="hint" id="finance-test-result"></p>
+      <fieldset>
+        <legend>CAL reconciliation streams (v2)</legend>
+        <p class="hint">Only listed streams use v2. Others remain legacy. Copy the exact source account ID and full card/payment source name; the same name must be registered in Finance Tracker. Never enter only last four digits. Frozen requests keep their version.</p>
+        <div id="finance-streams"></div>
+        <button type="button" id="btn-finance-stream-add" class="btn btn-secondary btn-sm">Add CAL stream</button>
+      </fieldset>
 
       <div class="card-head">
         <h3 style="margin:0;font-size:1rem;">Sync to Finance</h3>

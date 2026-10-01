@@ -1,3 +1,5 @@
+import { buildEvidence } from './financeContract.js';
+import { financeContractVersion, validateFinanceStreamBatch } from '../config/financeStreams.js';
 import { parseAmount } from '../providers/cal/normalizer.js';
 import { logger } from '../infrastructure/logger.js';
 import { redactSecrets, truncate } from '../infrastructure/redact.js';
@@ -92,7 +94,7 @@ export function classify409(bodyText) {
 }
 
 /** Build the finance-system payload for a single transaction. */
-function buildFinancePayload(transaction, originalAmount) {
+export function buildFinancePayload(transaction, originalAmount = resolveOriginalAmount(transaction), contractVersion = 1) {
     return {
         type: "expense",
         amount: transaction.chargeAmount,
@@ -113,6 +115,7 @@ function buildFinancePayload(transaction, originalAmount) {
         // authoritative "already sent" record. Transactions with identical business
         // fields get distinct keys (baseFp vs baseFp|#2).
         external_id: transaction.dedupKey,
+        ...(contractVersion === 2 ? { cal_contract: buildEvidence(transaction) } : {}),
     };
 }
 
@@ -145,7 +148,7 @@ export async function sendTransactionToFinance(transaction, financeConfig = {}, 
     // Guard against sending original_amount: 0 (e.g. older export files where a
     // foreign-currency amount failed to parse). A validation problem, not an API one.
     const originalAmount = resolveOriginalAmount(transaction);
-    if (originalAmount == null) {
+    if (!deps.frozenPayload && originalAmount == null) {
         return {
             ok: false,
             classification: "api_validation_failed",
@@ -154,7 +157,7 @@ export async function sendTransactionToFinance(transaction, financeConfig = {}, 
         };
     }
 
-    const payload = buildFinancePayload(transaction, originalAmount);
+    const payload = deps.frozenPayload ?? buildFinancePayload(transaction, originalAmount, financeContractVersion(transaction, financeConfig));
 
     // NB: never log the payload (financial data) or the auth header (secret).
     let response;
@@ -211,6 +214,13 @@ export async function sendTransactionToFinance(transaction, financeConfig = {}, 
             };
         }
 
+        let validationReason = null;
+        try {
+            const code = JSON.parse(bodyText)?.error;
+            if (['cal_supported_ils_purchase_required','cal_unsupported_amount_basis',
+                'cal_registration_required','cal_billed_ils_required','cal_event_semantics_required',
+                'cal_installment_identity_required','cal_refund_policy_required','cal_payload_changed'].includes(code)) validationReason = code;
+        } catch { /* no unrestricted error text in audit fields */ }
         // 4xx → the request was rejected (validation/auth); 5xx/other → server-side.
         const classification = response.status >= 400 && response.status < 500
             ? "api_validation_failed"
@@ -218,19 +228,24 @@ export async function sendTransactionToFinance(transaction, financeConfig = {}, 
         return {
             ok: false,
             classification,
+            validationReason,
+            terminalConflict: response.status === 422 && /cal_payload_changed|idempotency_key_conflict/.test(bodyText),
             apiStatus: response.status,
             message: `HTTP ${response.status}${safeBody}`,
         };
     }
 
     // Best-effort extraction of a finance-side id for the audit trail.
-    let financeTransactionId = null;
+    let financeTransactionId = null, financialPosted = null, observationId = null, disposition = null;
     try {
         const data = await response.json();
         financeTransactionId = data?.id ?? data?.transaction_id ?? data?.data?.id ?? null;
+        financialPosted = typeof data?.financial_posted === 'boolean' ? data.financial_posted : null;
+        observationId = data?.observation_id ?? null;
+        disposition = data?.disposition ?? null;
     } catch { /* body may be empty or non-JSON — id stays null */ }
 
-    return { ok: true, apiStatus: response.status, financeTransactionId };
+    return { ok: true, apiStatus: response.status, financeTransactionId, financialPosted, observationId, disposition };
 }
 
 /**
@@ -250,6 +265,7 @@ export async function exportToFinanceSystem(transactions, financeConfig = {}) {
     if (!Array.isArray(transactions)) {
         throw new Error("Expected transactions to be an array");
     }
+    validateFinanceStreamBatch(transactions, financeConfig);
 
     const apiUrl = financeConfig.apiUrl ?? process.env.FINANCE_API_URL;
     const apiKey = financeConfig.apiKey ?? process.env.FINANCE_API_KEY;
@@ -263,7 +279,7 @@ export async function exportToFinanceSystem(transactions, financeConfig = {}) {
             continue;
         }
 
-        const result = await sendTransactionToFinance(transaction, { apiUrl, apiKey });
+        const result = await sendTransactionToFinance(transaction, { apiUrl, apiKey, v2Streams: financeConfig.v2Streams });
         if (!result.ok) {
             throw new Error(`Failed to export "${transaction.merchantName}": ${result.message}`);
         }

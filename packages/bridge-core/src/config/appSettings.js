@@ -27,6 +27,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from '
 import { dirname } from 'path';
 import { config as defaultConfig } from '../config.js';
 import { loadSourceAccounts } from './sourceAccounts.js';
+import { financeV2Streams } from './financeStreams.js';
 
 export const DAYS_BACK_MIN = 1;
 export const DAYS_BACK_MAX = 365;
@@ -85,7 +86,9 @@ export const FINANCE_CREDENTIAL_KEY = 'finance-default';
  * non-secret configuration and is stored in plaintext.
  */
 function sanitizeFinanceForStorage(raw = {}) {
+  financeV2Streams(raw); // Malformed/obsolete global v2 configuration fails visibly.
   return {
+    ...(raw.v2Streams !== undefined ? { v2Streams: financeV2Streams(raw) } : {}),
     enabled:       raw.enabled === true,
     apiUrl:        String(raw.apiUrl ?? '').trim(),
     credentialKey: String(raw.credentialKey || FINANCE_CREDENTIAL_KEY).trim() || FINANCE_CREDENTIAL_KEY,

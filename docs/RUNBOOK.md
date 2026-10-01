@@ -155,3 +155,96 @@ git ls-files -ci --exclude-standard   # should be empty
   available; the Environment panel reports `secureStorage: available/unavailable`.
 - **Desktop won't open** — run `npm install`, then `npm run desktop`; check the
   terminal for errors.
+
+## 10. Opt-in CAL billing evidence v2 (unreleased)
+
+The Financial System Integration panel has an exact CAL stream list. Default is
+Legacy v1 for all streams. Do not select streams until the consumer and exact account
+registration are ready. Existing settings, credentials, sent history and dedup/occurrence
+identities are preserved; changing version does not resend previously accepted records.
+
+V2 adds `cal_contract: {version:2,billed,original,event}` to the existing envelope.
+Money is `{amount:<exact printed decimal string>,currency:<explicit code>,scale:<printed decimals>}`;
+missing original evidence is null. No guessed rate/time/reference. CAL export's billed
+ILS column and explicit currency symbols/codes supply currency. Provider type labels
+supply event kind and full-purchase versus installment-part basis. Unknown remains
+unknown; refund remains refund; part N/M is retained only if printed. No purchase-group
+identifier is currently available. Finance Tracker rejects unsupported event/part
+semantics instead of silently creating an expense. Whole-account activation is still
+blocked pending those semantics; this is not a claim of installment/refund support.
+
+The existing ledger now freezes payload/content hash before HTTP and saves outcomes
+per attempt. Queued frozen requests keep their old version. Uncertain pre-upgrade
+attempts without a saved body reconstruct the legacy shape; a confirmed old 4xx
+rejection without a frozen body may use v2. Frozen legacy FX/amount-basis requests
+may transition only after their explicit non-accepting 422, with an unchanged legacy
+envelope; the rejected body is retained and v2 is saved before HTTP. Other frozen
+requests stay unchanged. If source content changed since an uncertain
+old attempt, a server payload conflict stops automatic retry for review. Never reset
+ledgers, change occurrence keys, remove sent entries or edit frozen bodies to bypass it.
+A missing ledger is a first-use state; a corrupt/unreadable ledger now stops syncing
+rather than forgetting sent history. Keep a recoverable backup before upgrading.
+
+202/pending acceptance is not an expense. Reports persist `financialPosted`,
+`observationId`, `disposition` and `accepted_pending_review`; the summary distinguishes
+accepted from pending-not-posted. Review in Finance Tracker, without resending accepted
+observations. Reports are historical snapshots, not polling of later owner decisions.
+Unknown/part/refund/registration errors identify the required action. Their frozen
+payloads remain for an explicit later recovery, never an automatic new identity.
+
+Rollout: consumer migrations 045/046/047 and consumer code first; keep existing ingestion
+flags off. Resolve remaining semantic coverage, verify exact account registration, then
+select only registered streams/save Bridge settings with no finance sync in flight. Registration/native
+phone activation are separate owner operations. No new provider/API credentials.
+Rollback retains ledger and server provenance; do not restore a direct cash-write bypass.
+
+Local verification uses fake transport, temporary ledgers and disposable databases only.
+Real saved exports are read-only; snapshots overlap and must not be counted as unique
+purchases. The tested examples cover 330/331 eligible appearances, including all 148 FX
+appearances; one `שרותים` event remains unclassified. No real installment/refund example
+has been verified. Financial Data Bridge remains 3.0.3; release impact Yes, anticipated
+Minor, candidate TBD coordinated with Finance Tracker #84, Unreleased documented,
+version bump deferred, publication out of scope, owner acceptance pending.
+
+Verification for this correction: 63/63 focused contract, sync, rate-limit, 409,
+ledger, report and settings tests passed. Actual exporter/consumer tests in Finance
+Tracker passed 17/17; disposable persistence verification covers 30 distinct passing
+scenarios across a main run and focused reruns. No live provider/production requests
+were used. The owner knows of no additional local installment detail; real installment
+validation and safe part posting remain pending, not implied by synthetic fixtures.
+
+Focused activation clarification: the saved `שרותים` row is an ILS 60.00
+`עמלת פירעון` charge dated 2026-06-03 on card 5746, not 2755. It comes from the
+modal's `סוג העסקה` via `raw.transactionType`, not merchant-category `expenseType`.
+Its local ledger already records HTTP 201/sent on 2026-06-22; it will not resend.
+V2 rejects a fresh equivalent delivery because full-purchase semantics are unproven.
+Do not map all `שרותים` labels to ordinary purchases based on this description.
+
+Legacy installments were only positive billed rows exported as expenses, without
+part/group fields or schedules. V2's explicit-part rejection is a known conditional
+change; no real installment failure on the intended card was observed. Missing samples
+alone do not establish a regression. Safe handling needs the actual row's billed basis
+and its relationship to a full Wallet purchase, not a guessed identifier.
+
+The earlier global-selector blocker is now corrected with `finance.v2Streams`, an
+array of `{provider:"cal",providerAccountId:"<exact source account ID>",
+paymentSourceName:"<exact outgoing accountId>"}`. Add/remove rows under **CAL
+reconciliation streams (v2)** and use the existing Save settings action. No rows means
+legacy for every stream. Use the exact name registered as `payment_source_name` in
+Finance Tracker, not displayName/last4. Account IDs and names are case-sensitive,
+not trimmed or inferred. Invalid/duplicate entries fail without overwriting settings;
+obsolete global v2 configuration requires explicit stream selection.
+
+Settings/IPC, desktop sync and file export all carry this list. Frozen bodies retain
+their version after selection changes. Rejected v2 never retries as legacy. Missing
+registration or unsupported events remain failed, not delivered. Sent history is
+never resent. If an unselected account shares a selected registration's exact name,
+the batch stops before ledger/HTTP mutation: current consumer registration cannot
+distinguish those accounts. Resolve that scope explicitly before activation.
+
+Verification: 69/69 focused settings/desktop/export/selection tests and 9/9 sync
+regressions; Finance Tracker producer/consumer 17/17. The optional disposable database
+rerun was blocked by unavailable Docker, with prior unchanged SQL evidence retained.
+Desktop visual acceptance is pending. No actual settings/ledger change, live sync or
+provider request was used. Commit and disabled deployment readiness are separate from
+production registration/selection and the existing conditional installment limitation.
