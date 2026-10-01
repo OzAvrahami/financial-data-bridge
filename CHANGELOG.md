@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## [3.1.0] - Prepared (unpublished)
+
+Prepared on 2026-10-01 from `3f9ebcbe33fcd6243569d23338b551e934b5b77b`. See [release notes](docs/RELEASE_3_1_0.md).
+
 ### Added
 
 - Opt-in CAL billing-evidence v2 for Finance Tracker: exact billed/original money,
@@ -16,8 +20,7 @@
   data and desktop summaries. No ledger reset, provider request or automatic posting
   is part of this local preparation.
 
-Version remains 3.0.3. Anticipated release impact: Minor; next version TBD after
-coordinated compatibility verification and owner review.
+Candidate metadata is 3.1.0; dependency versions are unchanged. Publication and production activation remain pending.
 
 ### Fixed
 

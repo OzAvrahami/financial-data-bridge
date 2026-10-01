@@ -1,5 +1,9 @@
 # Runbook — Financial Data Bridge
 
+Current release preparation: [v3.1.0, unpublished](RELEASE_3_1_0.md). Earlier
+3.0.3/deferred-version statements below record implementation checkpoints. The
+consumer-first rollout and explicit stream-registration requirements remain in force.
+
 Developer / maintainer notes for the **desktop** Financial Data Bridge.
 End-user instructions live in the root `README.md`; this file is for people
 working on the code.

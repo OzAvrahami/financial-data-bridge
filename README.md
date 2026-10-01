@@ -1,5 +1,9 @@
 # Financial Data Bridge
 
+[v3.1.0 is prepared locally, unpublished](docs/RELEASE_3_1_0.md). The opt-in CAL
+contract requires the coordinated Finance Tracker consumer; default streams remain
+legacy. Version preparation does not enable sync or change existing ledgers.
+
 A **desktop application** that logs into your financial provider (CAL today;
 multi-provider by design), fetches and deduplicates transactions, and can export
 them. Built with **Electron** on top of a reusable **bridge-core** engine.
